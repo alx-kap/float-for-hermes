@@ -32,6 +32,14 @@ final class Preferences {
         ("Ocean", "#0B1E2A"), ("Forest", "#0F1D17"), ("Plum", "#1D1424"), ("Espresso", "#1F1712"),
     ]
 
+    /// Widest the card gets: the chat's reading column plus its side insets. Wider than that,
+    /// lines would get too long to read, so the card stops growing instead.
+    static var maxPanelWidth: Double { (680 * shared.textScale).rounded() + 56 }
+    static let minPanelWidth = 520.0
+
+    /// The saved width, capped for the current text size (⌘− can lower the cap).
+    var effectivePanelWidth: Double { min(max(panelWidth, Self.minPanelWidth), Self.maxPanelWidth) }
+
     static let textScales: [Double] = [0.85, 1, 1.15, 1.3, 1.5, 1.75]
     static let defaultPanelWidth = 680.0
     static let defaultListHeight = 440.0

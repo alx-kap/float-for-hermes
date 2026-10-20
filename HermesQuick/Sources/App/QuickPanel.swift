@@ -42,7 +42,7 @@ final class QuickPanel: NSPanel {
     /// the content; the message list shrinks to fit before anything can overflow (see QuickChatView).
     static func fittingSize() -> NSSize {
         let prefs = Preferences.shared
-        return NSSize(width: prefs.panelWidth + 80, height: prefs.listHeight + 280)
+        return NSSize(width: prefs.effectivePanelWidth + 80, height: prefs.listHeight + 280)
     }
 
     override var canBecomeKey: Bool { true }

@@ -8,7 +8,7 @@ struct QuickChatView: View {
     @Namespace private var glass
 
     private var prefs: Preferences { Preferences.shared }
-    private var cardWidth: CGFloat { prefs.panelWidth }
+    private var cardWidth: CGFloat { prefs.effectivePanelWidth }
     private var listHeight: CGFloat { prefs.listHeight }
     private var hasConversation: Bool {
         !store.messages.isEmpty || store.voice.isConversing || store.showingHistory || store.isOpeningSession
@@ -39,6 +39,7 @@ struct QuickChatView: View {
         }
         .onChange(of: prefs.panelWidth) { presentation.refit() }
         .onChange(of: prefs.listHeight) { presentation.refit() }
+        .onChange(of: prefs.textScale) { presentation.refit() }
     }
 
     @ViewBuilder
@@ -497,7 +498,7 @@ struct ResizeHandles: View {
     private func drag(_ edge: Edge) {
         let prefs = Preferences.shared
         let mouse = NSEvent.mouseLocation
-        if start == nil { start = (mouse, prefs.panelWidth, prefs.listHeight) }
+        if start == nil { start = (mouse, prefs.effectivePanelWidth, prefs.listHeight) }
         guard let start else { return }
         let dx = mouse.x - start.mouse.x
         let dy = start.mouse.y - mouse.y
@@ -509,7 +510,7 @@ struct ResizeHandles: View {
         case .bottom: break
         }
         if edge == .bottom || edge == .bottomLeft || edge == .bottomRight { height += dy }
-        prefs.panelWidth = min(max(width, 520), screen.width - 120).rounded()
+        prefs.panelWidth = min(max(width, Preferences.minPanelWidth), Preferences.maxPanelWidth, screen.width - 120).rounded()
         prefs.listHeight = min(max(height, 240), screen.height - 340).rounded()
     }
 }

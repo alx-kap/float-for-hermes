@@ -78,7 +78,9 @@ struct MessageList: View {
             // Inset as far as the card's corner radius, so text clears the rounded corners
             // and the column reads as sitting inside the shape.
             .padding(.horizontal, 28)
-            .padding(.vertical, 12)
+            .padding(.top, 12)
+            // Clear of the list's bottom fade, so the last line sits well above the input bar.
+            .padding(.bottom, 26)
     }
 }
 
