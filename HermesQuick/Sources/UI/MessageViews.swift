@@ -4,7 +4,22 @@ struct MessageList: View {
     @Environment(ChatStore.self) private var store
 
     var body: some View {
-        ScrollView {
+        if UIPreview.isFlat {
+            // Debug snapshots: ImageRenderer can't draw the AppKit-backed scroll view.
+            rows.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).clipped()
+        } else {
+            ScrollView { rows }
+                .defaultScrollAnchor(.bottom, for: .sizeChanges)
+                .defaultScrollAnchor(.bottom, for: .initialOffset)
+                .scrollIndicators(.automatic)
+                .mask(
+                    LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.04),
+                                           .init(color: .black, location: 0.96), .init(color: .clear, location: 1)],
+                                   startPoint: .top, endPoint: .bottom))
+        }
+    }
+
+    private var rows: some View {
             LazyVStack(alignment: .leading, spacing: 0) {
                 // Only the latest exchange can be edited, retried or regenerated (session.undo drops the last turn).
                 let messages = store.messages
@@ -38,14 +53,6 @@ struct MessageList: View {
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 12)
-        }
-        .defaultScrollAnchor(.bottom, for: .sizeChanges)
-        .defaultScrollAnchor(.bottom, for: .initialOffset)
-        .scrollIndicators(.automatic)
-        .mask(
-            LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.04),
-                                   .init(color: .black, location: 0.96), .init(color: .clear, location: 1)],
-                           startPoint: .top, endPoint: .bottom))
     }
 }
 

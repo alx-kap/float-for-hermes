@@ -50,7 +50,16 @@ final class AuthManager {
 
     private var account: String { "tokens:" + (prefs.baseURL?.absoluteString ?? "") }
 
-    init() { reload() }
+    init() {
+        #if DEBUG
+        if UIPreview.isRequested { return }  // sample data only; reading the Keychain would prompt
+        #endif
+        reload()
+    }
+
+    #if DEBUG
+    func previewSignIn() { isSignedIn = true }
+    #endif
 
     func reload() {
         if let data = Keychain.get(account), let t = try? JSONDecoder().decode(TokenSet.self, from: data) {

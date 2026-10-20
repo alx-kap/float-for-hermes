@@ -30,6 +30,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotKey: HotKey?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        #if DEBUG
+        if UIPreview.isRequested { UIPreview.start(store: store, panel: panel); return }
+        #endif
         registerHotKey()
         store.isPanelVisible = { [weak self] in self?.panel.isVisible ?? true }
         panel.onShow = { [weak self] in self?.store.panelDidShow() }

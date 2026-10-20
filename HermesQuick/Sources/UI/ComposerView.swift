@@ -60,6 +60,9 @@ struct ComposerView: View {
                                 .animation(.easeOut(duration: 0.15), value: voice.transcript)
                         }
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    } else if UIPreview.isFlat {
+                        // Debug snapshots: ImageRenderer can't draw the AppKit-backed text field.
+                        Text(placeholder).font(.app(17)).foregroundStyle(.tertiary)
                     } else {
                         TextField(placeholder, text: $store.draft, axis: .vertical)
                             .textFieldStyle(.plain)
@@ -78,24 +81,43 @@ struct ComposerView: View {
                 conversationButton
                 sendButton
             }
+            // Under a conversation the input is its own pill, set apart from the messages. With no
+            // conversation the card itself is the input bar, so it stays flat.
+            .padding(.horizontal, inPill ? 6 : 0)
+            .padding(.vertical, inPill ? 5 : 0)
+            .background {
+                if inPill {
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .fill(.primary.opacity(0.06))
+                        .strokeBorder(.primary.opacity(0.09))
+                        .transition(.opacity)
+                }
+            }
 
             if store.showSlash {
                 SlashMenu()
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(.horizontal, inPill ? 12 : 14)
+        .padding(.top, inPill ? 4 : 12)
+        .padding(.bottom, 12)
         .background(WindowDragArea())
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: voice.isListening)
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: store.attachments.count)
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: store.showSlash)
         .animation(.snappy, value: store.messages.isEmpty)
+        .animation(.snappy, value: inPill)
         .animation(.snappy, value: store.editingMessageId)
         .onChange(of: store.draft) { _, text in store.updateSlash(for: text) }
         .onChange(of: presentation.focusToken) { focused = true }
         .onAppear { focused = true }
         .background(shortcuts)
+    }
+
+    /// Matches when QuickChatView shows a conversation above the composer.
+    private var inPill: Bool {
+        !store.messages.isEmpty || store.voice.isConversing || store.isOpeningSession
     }
 
     private var placeholder: String {

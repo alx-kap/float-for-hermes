@@ -4,6 +4,8 @@ import SwiftUI
 struct ContextGauge: View {
     @Environment(ChatStore.self) private var store
     let usage: UsageInfo
+    /// Ring only; the percentage appears once it's getting full (75%+).
+    var compact = false
     @State private var showing = false
     @State private var hovering = false
 
@@ -19,20 +21,23 @@ struct ContextGauge: View {
                         .rotationEffect(.degrees(-90))
                 }
                 .frame(width: 14, height: 14)
-                Text("\(Int((fraction * 100).rounded()))%")
-                    .font(.system(size: 11, weight: .medium))
-                    .monospacedDigit()
-                    .contentTransition(.numericText())
-                    .foregroundStyle(fraction >= 0.75 ? Self.tint(fraction) : .secondary)
+                if !compact || fraction >= 0.75 {
+                    Text("\(Int((fraction * 100).rounded()))%")
+                        .font(.system(size: 11, weight: .medium))
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
+                        .foregroundStyle(fraction >= 0.75 ? Self.tint(fraction) : .secondary)
+                }
             }
             .padding(.horizontal, 7)
+            .frame(minWidth: 28)
             .frame(height: 28)
             .background(.primary.opacity(hovering || showing ? 0.08 : 0), in: Capsule())
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .onHover { h in withAnimation(.easeOut(duration: 0.15)) { hovering = h } }
-        .help("Context: \(UsageInfo.compact(usage.contextUsed ?? 0)) of \(UsageInfo.compact(usage.contextMax ?? 0)) tokens")
+        .help("Context \(Int((fraction * 100).rounded()))% full: \(UsageInfo.compact(usage.contextUsed ?? 0)) of \(UsageInfo.compact(usage.contextMax ?? 0)) tokens")
         .animation(.snappy, value: fraction)
         .popover(isPresented: $showing, arrowEdge: .bottom) {
             UsagePopover()

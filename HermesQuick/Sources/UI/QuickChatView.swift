@@ -15,7 +15,7 @@ struct QuickChatView: View {
     }
 
     var body: some View {
-        GlassEffectContainer(spacing: 14) {
+        PanelGlassContainer {
             VStack(spacing: 10) {
                 card
                 if let err = store.lastError ?? store.voice.errorMessage {
@@ -95,8 +95,7 @@ struct QuickChatView: View {
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-        .glassEffectID("card", in: glass)
+        .panelGlass(RoundedRectangle(cornerRadius: 28, style: .continuous), id: "card", in: glass)
         .shadow(color: .black.opacity(0.28), radius: 30, y: 16)
         // Grab strips straddle the card's edge (half outside, in the window's transparent margin).
         .overlay { if store.auth.isSignedIn { ResizeHandles(vertical: hasConversation && !store.voice.isConversing).padding(-ResizeHandles.overhang) } }
@@ -129,6 +128,26 @@ struct QuickChatView: View {
     }
 }
 
+/// The card's glass. Debug snapshots (`-uiPreviewSnapshot`) draw it flat: system glass can't be
+/// rendered in-process, and content inside it comes out blank.
+private struct PanelGlassContainer<Content: View>: View {
+    @ViewBuilder let content: Content
+    var body: some View {
+        if UIPreview.isFlat { content } else { GlassEffectContainer(spacing: 14) { content } }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func panelGlass<S: InsettableShape>(_ shape: S, id: String, in namespace: Namespace.ID) -> some View {
+        if UIPreview.isFlat {
+            self.overlay(shape.strokeBorder(.white.opacity(0.12)))
+        } else {
+            self.glassEffect(.regular, in: shape).glassEffectID(id, in: namespace)
+        }
+    }
+}
+
 extension AnyTransition {
     /// Swap two views that share a spot: the old one fades out first, then the new one fades in,
     /// so their contents never show through each other.
@@ -146,71 +165,85 @@ struct HeaderBar: View {
     @Environment(ChatStore.self) private var store
     @Environment(\.openSettings) private var openSettings
 
+    private var botName: String { store.activeBot?.displayName ?? Preferences.shared.profile.capitalized }
+
     var body: some View {
-        HStack(spacing: 8) {
-            botMenu
-            modelMenu
-            if store.showingHistory {
-                Text("Chats")
-                    .font(.system(size: 13, weight: .semibold))
-                    .padding(.leading, 4)
-                    .transition(.handoff)
-            } else {
-                ChatTitle()
-                    .transition(.handoff)
+        HStack(spacing: 10) {
+            // Title first; who and which model sit underneath as a subtitle that opens the bot/model menu.
+            // Only the title flexes, so a long name truncates and nothing else moves.
+            identityMenu {
+                BotAvatar(name: botName, size: 30)
             }
-            Spacer(minLength: 4)
+            VStack(alignment: .leading, spacing: 1) {
+                if store.showingHistory {
+                    Text("Chats")
+                        .font(.system(size: 14, weight: .semibold))
+                        .transition(.handoff)
+                } else {
+                    ChatTitle()
+                        .transition(.handoff)
+                }
+                identityMenu {
+                    HStack(spacing: 3) {
+                        Text("\(botName) · \(shortModel)")
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .contentTransition(.numericText())
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 8, weight: .bold))
+                    }
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
             if store.isBusy {
                 ThinkingDots()
                     .transition(.scale.combined(with: .opacity))
             }
-            if !store.showingHistory, let usage = store.usage, usage.contextFraction != nil {
-                ContextGauge(usage: usage)
-                    .transition(.scale.combined(with: .opacity))
+            HStack(spacing: 0) {
+                if !store.showingHistory, let usage = store.usage, usage.contextFraction != nil {
+                    ContextGauge(usage: usage, compact: true)
+                        .transition(.scale.combined(with: .opacity))
+                }
+                IconButton(symbol: "clock.arrow.circlepath", help: "Past chats (⌘K)",
+                           active: store.showingHistory) { store.toggleHistory() }
+                IconButton(symbol: "square.and.pencil", help: "New chat (⌘N)") { store.newChat() }
             }
-            IconButton(symbol: "clock.arrow.circlepath", help: "Past chats (⌘K)",
-                       active: store.showingHistory) { store.toggleHistory() }
-            IconButton(symbol: "square.and.pencil", help: "New chat (⌘N)") { store.newChat() }
-            IconButton(symbol: "gearshape", help: "Settings") {
-                NSApp.activate()
-                openSettings()
-            }
+            .padding(.horizontal, 3)
+            .frame(height: 34)
+            .glassEffect(.regular, in: Capsule())
+            .fixedSize()
         }
-        .padding(.horizontal, 14)
+        .padding(.leading, 14)
+        .padding(.trailing, 12)
         .padding(.top, 14)
         .padding(.bottom, 8)
         .background(WindowDragArea())
         .overlay(alignment: .top) { DragGrabber().padding(.top, 4) }
         .animation(.snappy, value: store.isBusy)
         .animation(.snappy, value: store.showingHistory)
+        .task {
+            if store.bots.isEmpty { await store.refreshBots() }
+            if store.models.isEmpty { await store.refreshModels() }
+        }
     }
 
-    private var botMenu: some View {
+    /// The avatar and the subtitle both open this: bots, then models by provider, then Settings.
+    private func identityMenu<MenuLabel: View>(@ViewBuilder label: () -> MenuLabel) -> some View {
         Menu {
-            if store.bots.isEmpty { Text("No bots found") }
-            ForEach(store.bots) { bot in
-                Button {
-                    store.switchBot(bot)
-                } label: {
-                    if bot.name == Preferences.shared.profile { Label(bot.displayName, systemImage: "checkmark") }
-                    else { Text(bot.displayName) }
+            Section("Bot") {
+                if store.bots.isEmpty { Text("No bots found") }
+                ForEach(store.bots) { bot in
+                    Button {
+                        store.switchBot(bot)
+                    } label: {
+                        if bot.name == Preferences.shared.profile { Label(bot.displayName, systemImage: "checkmark") }
+                        else { Text(bot.displayName) }
+                    }
                 }
             }
-        } label: {
-            HStack(spacing: 6) {
-                BotAvatar(name: store.activeBot?.displayName ?? Preferences.shared.profile)
-                Text(store.activeBot?.displayName ?? Preferences.shared.profile.capitalized)
-                    .font(.system(size: 13, weight: .semibold))
-            }
-        }
-        .menuStyle(.button)
-        .buttonStyle(.glass)
-        .fixedSize()
-        .task { if store.bots.isEmpty { await store.refreshBots() } }
-    }
-
-    private var modelMenu: some View {
-        Menu {
             let groups = Dictionary(grouping: store.models, by: \.providerName)
             ForEach(groups.keys.sorted(), id: \.self) { provider in
                 Section(provider) {
@@ -230,21 +263,18 @@ struct HeaderBar: View {
             if store.models.isEmpty { Text("Loading models…") }
             Divider()
             Button("Refresh Models") { Task { await store.refreshModels() } }
-        } label: {
-            HStack(spacing: 5) {
-                Image(systemName: "cpu")
-                    .font(.system(size: 11, weight: .semibold))
-                Text(shortModel)
-                    .font(.system(size: 12, weight: .medium))
-                    .lineLimit(1)
-                    .contentTransition(.numericText())
+            Button("Settings…") {
+                NSApp.activate()
+                openSettings()
             }
-            .foregroundStyle(.secondary)
+        } label: {
+            label()
         }
         .menuStyle(.button)
-        .buttonStyle(.glass)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
         .fixedSize()
-        .task { if store.models.isEmpty { await store.refreshModels() } }
+        .help("Switch bot or model")
     }
 
     private var shortModel: String {
@@ -265,25 +295,28 @@ struct ChatTitle: View {
             if editing {
                 TextField("Chat name", text: $text)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 14, weight: .semibold))
                     .focused($focused)
                     .onSubmit(commit)
                     .onExitCommand { editing = false }
                     .onChange(of: focused) { _, f in if !f && editing { commit() } }
-                    .padding(.horizontal, 7).padding(.vertical, 3)
+                    .padding(.horizontal, 6).padding(.vertical, 1)
+                    .padding(.leading, -6)
                     .background(.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                    .frame(maxWidth: 220)
+                    .frame(maxWidth: 320, alignment: .leading)
             } else if !store.currentTitle.isEmpty {
                 Text(store.currentTitle)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 14, weight: .semibold))
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .contentTransition(.opacity)
-                    .padding(.leading, 4)
                     .onTapGesture(count: 2, perform: beginEditing)
                     .contextMenu { Button("Rename…", action: beginEditing) }
-                    .help("Double-click to rename")
+                    .help(store.currentTitle + "\nDouble-click to rename")
+            } else {
+                Text("New Chat")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.secondary)
             }
         }
         .animation(.snappy, value: store.currentTitle)
@@ -303,11 +336,12 @@ struct ChatTitle: View {
 
 struct BotAvatar: View {
     let name: String
+    var size: CGFloat = 18
     var body: some View {
         Text(String(name.prefix(1)).uppercased())
-            .font(.system(size: 10, weight: .bold, design: .rounded))
+            .font(.system(size: size * 0.55, weight: .bold, design: .rounded))
             .foregroundStyle(.white)
-            .frame(width: 18, height: 18)
+            .frame(width: size, height: size)
             .background(gradient, in: Circle())
     }
 
@@ -539,7 +573,7 @@ struct PanelBackdrop: View {
 
     var body: some View {
         ZStack {
-            BehindWindowBlur().opacity(min(1, opacity * 1.6))
+            if !UIPreview.isFlat { BehindWindowBlur().opacity(min(1, opacity * 1.6)) }
             tint.opacity(opacity * 0.75)
         }
         .allowsHitTesting(false)

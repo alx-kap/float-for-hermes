@@ -59,6 +59,10 @@ final class PanelController {
 
     private var pasteMonitor: Any?
 
+    #if DEBUG
+    var window: NSWindow { panel }
+    #endif
+
     init(store: ChatStore) {
         let root = QuickChatView()
             .environment(store)
