@@ -38,13 +38,16 @@ struct ComposerView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
+            // Every control is centred in a row one text line tall (it grows with the text size), so a
+            // one-line draft lines up with the buttons; a longer draft grows upward and the buttons
+            // stay with its last line.
             HStack(alignment: .bottom, spacing: 8) {
                 IconButton(symbol: "plus", help: "Attach files (⌘O)") { store.chooseFiles(over: NSApp.keyWindow) }
-                    .padding(.bottom, 2)
+                    .frame(height: rowHeight)
                 if store.messages.isEmpty && !store.voice.isConversing && !store.isOpeningSession && !store.showingHistory {
                     // The header (with its own history button) only appears once a chat has started.
                     IconButton(symbol: "clock.arrow.circlepath", help: "Past chats (⌘K)") { store.openHistory() }
-                        .padding(.bottom, 2)
+                        .frame(height: rowHeight)
                         .transition(.scale.combined(with: .opacity))
                 }
 
@@ -74,25 +77,18 @@ struct ComposerView: View {
                             .transition(.opacity)
                     }
                 }
-                .padding(.vertical, 6)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 5)
+                .frame(maxWidth: .infinity, minHeight: rowHeight, alignment: .leading)
 
-                micButton
-                conversationButton
-                sendButton
+                micButton.frame(height: rowHeight)
+                conversationButton.frame(height: rowHeight)
+                sendButton.frame(height: rowHeight)
             }
-            // Under a conversation the input is its own pill, set apart from the messages. With no
+            // Under a conversation the input is its own glass pill, raised off the messages. With no
             // conversation the card itself is the input bar, so it stays flat.
             .padding(.horizontal, inPill ? 6 : 0)
             .padding(.vertical, inPill ? 5 : 0)
-            .background {
-                if inPill {
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .fill(.primary.opacity(0.06))
-                        .strokeBorder(.primary.opacity(0.09))
-                        .transition(.opacity)
-                }
-            }
+            .modifier(PillGlass(isOn: inPill))
 
             if store.showSlash {
                 SlashMenu()
@@ -115,6 +111,14 @@ struct ComposerView: View {
         .background(shortcuts)
     }
 
+    static let buttonSize: CGFloat = 32
+
+    /// One line of the draft plus the field's vertical padding, never shorter than the buttons.
+    private var rowHeight: CGFloat {
+        let font = NSFont.systemFont(ofSize: (17 * Preferences.shared.textScale).rounded())
+        return max(Self.buttonSize, ceil(NSLayoutManager().defaultLineHeight(for: font)) + 10)
+    }
+
     /// Matches when QuickChatView shows a conversation above the composer.
     private var inPill: Bool {
         !store.messages.isEmpty || store.voice.isConversing || store.isOpeningSession
@@ -134,7 +138,7 @@ struct ComposerView: View {
                 .font(.app(14, weight: .semibold))
                 .symbolEffect(.variableColor.iterative, isActive: listening)
                 .contentTransition(.symbolEffect(.replace))
-                .frame(width: 32, height: 32)
+                .frame(width: Self.buttonSize, height: Self.buttonSize)
         }
         .buttonStyle(.plain)
         .foregroundStyle(listening ? Color.red : .secondary)
@@ -148,7 +152,7 @@ struct ComposerView: View {
             Image(systemName: store.voice.isConversing ? "xmark" : "waveform.circle.fill")
                 .font(.app(store.voice.isConversing ? 13 : 17, weight: .semibold))
                 .contentTransition(.symbolEffect(.replace))
-                .frame(width: 32, height: 32)
+                .frame(width: Self.buttonSize, height: Self.buttonSize)
         }
         .buttonStyle(.plain)
         .foregroundStyle(store.voice.isConversing ? Color.primary : Color.accentColor)
@@ -166,7 +170,7 @@ struct ComposerView: View {
                 .font(.app(stops ? 11 : 14, weight: .bold))
                 .contentTransition(.symbolEffect(.replace))
                 .foregroundStyle(.white)
-                .frame(width: 32, height: 32)
+                .frame(width: Self.buttonSize, height: Self.buttonSize)
         }
         .buttonStyle(.plain)
         .glassEffect(.regular.tint(store.isBusy || store.canSend ? .accentColor : .gray.opacity(0.5)).interactive(), in: Circle())
@@ -318,6 +322,24 @@ struct LevelBars: View {
             }
             .foregroundStyle(.red)
             .frame(height: 24)
+        }
+    }
+}
+
+/// The composer's pill. The glass stays applied and only switches between `.regular` and `.identity`,
+/// so turning it on when a chat starts doesn't rebuild the text field and drop its focus.
+/// Debug snapshots can't draw system glass, so they get the flat look instead.
+private struct PillGlass: ViewModifier {
+    let isOn: Bool
+    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 22, style: .continuous) }
+
+    func body(content: Content) -> some View {
+        if UIPreview.isFlat {
+            content.background {
+                if isOn { shape.fill(.primary.opacity(0.06)).strokeBorder(.primary.opacity(0.09)) }
+            }
+        } else {
+            content.glassEffect(isOn ? .regular : .identity, in: shape)
         }
     }
 }

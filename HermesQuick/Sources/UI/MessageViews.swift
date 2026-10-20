@@ -2,6 +2,9 @@ import SwiftUI
 
 struct MessageList: View {
     @Environment(ChatStore.self) private var store
+    @State private var position = ScrollPosition(edge: .bottom)
+    /// Scrolled far enough up that the latest message is out of view.
+    @State private var awayFromBottom = false
 
     var body: some View {
         if UIPreview.isFlat {
@@ -9,14 +12,35 @@ struct MessageList: View {
             rows.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).clipped()
         } else {
             ScrollView { rows }
+                .scrollPosition($position)
                 .defaultScrollAnchor(.bottom, for: .sizeChanges)
                 .defaultScrollAnchor(.bottom, for: .initialOffset)
                 .scrollIndicators(.automatic)
+                .onScrollGeometryChange(for: Bool.self) { g in
+                    g.contentSize.height - g.visibleRect.maxY > 160
+                } action: { _, away in
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) { awayFromBottom = away }
+                }
                 .mask(
                     LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.04),
                                            .init(color: .black, location: 0.96), .init(color: .clear, location: 1)],
                                    startPoint: .top, endPoint: .bottom))
+                .overlay(alignment: .bottom) {
+                    if awayFromBottom {
+                        ScrollToBottomButton {
+                            withAnimation(.smooth(duration: 0.45)) { position.scrollTo(edge: .bottom) }
+                        }
+                        .padding(.bottom, 14)
+                        .transition(.scale(scale: 0.6).combined(with: .opacity).combined(with: .offset(y: 8)))
+                    }
+                }
         }
+    }
+
+    /// Each exchange gets room: a new message of yours starts well clear of the reply above it,
+    /// and a reply sits a little apart from the message it answers.
+    static func gap(before msg: ChatMessage) -> CGFloat {
+        msg.role == .user ? 30 : 22
     }
 
     private var rows: some View {
@@ -36,7 +60,7 @@ struct MessageList: View {
                         if stamp { TimeDivider(date: msg.date).padding(.top, i == 0 ? 0 : 6).padding(.bottom, 10) }
                         MessageRow(message: msg, isLatestUser: i == lastUser, isLatestReply: i == lastReply, hasTail: endsRun)
                     }
-                    .padding(.top, i == 0 ? 0 : joinsPrevious ? 3 : 14)
+                    .padding(.top, i == 0 ? 0 : joinsPrevious ? 3 : Self.gap(before: msg) * Preferences.shared.textScale)
                         .id(msg.id)
                         .transition(.asymmetric(
                             insertion: .move(edge: .bottom).combined(with: .opacity).combined(with: .scale(scale: 0.98, anchor: .bottom)),
@@ -51,8 +75,33 @@ struct MessageList: View {
                         .transition(.opacity)
                 }
             }
-            .padding(.horizontal, 18)
+            // Inset as far as the card's corner radius, so text clears the rounded corners
+            // and the column reads as sitting inside the shape.
+            .padding(.horizontal, 28)
             .padding(.vertical, 12)
+    }
+}
+
+/// Floats over the bottom of a scrolled-up chat and jumps back to the latest message.
+struct ScrollToBottomButton: View {
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "arrow.down")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(hovering ? .primary : .secondary)
+                .frame(width: 36, height: 36)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: Circle())
+        .shadow(color: .black.opacity(0.28), radius: 10, y: 5)
+        .scaleEffect(hovering ? 1.06 : 1)
+        .onHover { h in withAnimation(.snappy(duration: 0.18)) { hovering = h } }
+        .help("Scroll to latest")
+        .accessibilityLabel("Scroll to latest message")
     }
 }
 
