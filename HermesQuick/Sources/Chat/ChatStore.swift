@@ -19,7 +19,10 @@ final class ChatStore {
     var currentProvider = ""
     var models: [ModelChoice] = []
     var bots: [BotProfile] = []
-    var pendingApproval: ApprovalRequest?
+    /// Questions the gateway is waiting on, oldest first. The panel shows the first.
+    var prompts: [GatewayPrompt] = []
+    /// Multi-select picks for the clarifying question on screen.
+    var clarifySelection: Set<String> = []
     var slashItems: [SlashItem] = []
     var slashSelection = 0
     @ObservationIgnored var slashTask: Task<Void, Never>?
@@ -90,6 +93,7 @@ final class ChatStore {
         auth.signOut()
         sessionId = nil
         messages.removeAll()
+        clearPrompts()
     }
 
     func newChat() {
@@ -101,7 +105,7 @@ final class ChatStore {
         withAnimation(.smooth(duration: 0.35)) {
             messages.removeAll()
             attachments.removeAll()
-            pendingApproval = nil
+            clearPrompts()
             status = ""
             currentTitle = ""
             showingHistory = false
@@ -118,6 +122,7 @@ final class ChatStore {
         historySelection = 0
         withAnimation(.smooth(duration: 0.35)) {
             messages.removeAll()
+            clearPrompts()
             currentTitle = ""
         }
         warmUp()
@@ -164,6 +169,15 @@ final class ChatStore {
             withAnimation(.smooth(duration: 0.3)) { messages = Array(history.suffix(200)) }
         }
         if res["running"] as? Bool == true { isBusy = true }
+        // Questions still waiting from before we (re)attached; nothing listed means none are open.
+        let open = res["open_requests"] as? [JSON] ?? []
+        let openIds = Set(open.compactMap { $0["id"] as? String })
+        withAnimation(.snappy) { prompts.removeAll { $0.sessionId != sid && !openIds.contains($0.id) } }
+        for r in open {
+            if let id = r["id"] as? String, let method = r["method"] as? String {
+                handleServerRequest(id, method, r["params"] as? JSON ?? [:])
+            }
+        }
         if let stored, let row = sessions.first(where: { $0.id == stored }), !row.title.isEmpty { currentTitle = row.title }
         Task {
             if let r = try? await gateway.call("session.title", ["session_id": sid]),
@@ -281,7 +295,7 @@ final class ChatStore {
         streamingIndex = nil
         withAnimation(.smooth(duration: 0.3)) {
             messages.removeAll()
-            pendingApproval = nil
+            clearPrompts()
             status = ""
             isBusy = false
             currentTitle = s.title
@@ -422,12 +436,21 @@ final class ChatStore {
     // MARK: Sending
 
     var canSend: Bool {
-        !isBusy && (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty)
+        if let q = activeQuestion {
+            return !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (q.multiSelect && !clarifySelection.isEmpty)
+        }
+        return !isBusy && (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty)
     }
 
     func send() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canSend else { return }
+        // While Hermes is asking something, the composer types the answer.
+        if let q = activeQuestion {
+            draft = ""
+            answerClarify(q.multiSelect ? multiAnswer(extra: text) : text)
+            return
+        }
         if text.hasPrefix("/"), attachments.isEmpty {
             draft = ""
             dismissSlash()
@@ -497,10 +520,86 @@ final class ChatStore {
         Task { try? await gateway.call("session.interrupt", ["session_id": sid]) }
     }
 
+    // MARK: Prompts
+
+    var activePrompt: GatewayPrompt? { prompts.first }
+
+    /// The clarifying question on screen, if Hermes is asking one.
+    var activeQuestion: ClarifyQuestion? {
+        guard case .clarify(let qs) = activePrompt?.kind else { return nil }
+        return qs.first { !$0.locked }
+    }
+
     func respondToApproval(_ choice: String) {
-        guard let req = pendingApproval else { return }
-        gateway.respond(id: req.id, result: ["choice": choice])
-        withAnimation(.snappy) { pendingApproval = nil }
+        guard let p = activePrompt, case .approval = p.kind else { return }
+        gateway.respond(id: p.id, result: ["choice": choice])
+        removePrompt(p.id)
+    }
+
+    /// Locks the answer to the current question (nil skips it). The last one settles the request on the gateway.
+    func answerClarify(_ answer: String?) {
+        guard let p = activePrompt, case .clarify(var qs) = p.kind,
+              let i = qs.firstIndex(where: { !$0.locked }) else { return }
+        let qid = qs[i].id
+        qs[i].locked = true
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+            clarifySelection = []
+            if qs.allSatisfy(\.locked) { prompts.removeAll { $0.id == p.id } }
+            else if let j = prompts.firstIndex(where: { $0.id == p.id }) { prompts[j].kind = .clarify(qs) }
+        }
+        Task {
+            do {
+                let r = try await gateway.call("clarify.lock", [
+                    "request_id": p.id, "question_id": qid, "answer": answer.map { $0 as Any } ?? NSNull(),
+                ])
+                if r["status"] as? String == "expired" { removePrompt(p.id) }
+            } catch { report(error) }
+        }
+    }
+
+    func toggleClarifyChoice(_ choice: String) {
+        withAnimation(.snappy(duration: 0.2)) {
+            if clarifySelection.contains(choice) { clarifySelection.remove(choice) } else { clarifySelection.insert(choice) }
+        }
+    }
+
+    /// Multi-select answers go up as a JSON array: the ticked choices in order, then anything typed.
+    func multiAnswer(extra: String = "") -> String {
+        var picks = activeQuestion?.choices.filter(clarifySelection.contains) ?? []
+        if !extra.isEmpty { picks.append(extra) }
+        let data = (try? JSONSerialization.data(withJSONObject: picks)) ?? Data("[]".utf8)
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    /// Dismisses every remaining question; Hermes carries on without the answers.
+    func cancelClarify() {
+        guard let p = activePrompt, case .clarify = p.kind else { return }
+        gateway.respond(id: p.id, result: [:])
+        removePrompt(p.id)
+    }
+
+    /// Sends a password, secret or code. An empty value tells Hermes the user skipped it.
+    func answerSecret(_ value: String, identifier: String = "") {
+        guard let p = activePrompt, case .secret(let s) = p.kind else { return }
+        var answer = value
+        if s.style == .login, !value.isEmpty,
+           let data = try? JSONSerialization.data(withJSONObject: ["identifier": identifier, "password": value]) {
+            answer = String(decoding: data, as: UTF8.self)
+        }
+        gateway.respond(id: p.id, result: ["value": answer])
+        removePrompt(p.id)
+    }
+
+    private func removePrompt(_ id: String) {
+        withAnimation(.snappy) {
+            if prompts.first?.id == id { clarifySelection = [] }
+            prompts.removeAll { $0.id == id }
+        }
+    }
+
+    private func clearPrompts() {
+        prompts.removeAll()
+        clarifySelection = []
     }
 
     // MARK: Attachments
@@ -578,6 +677,9 @@ final class ChatStore {
                 withAnimation(.snappy) { currentTitle = t }
                 if let key = p["session_id"] as? String, let i = sessions.firstIndex(where: { $0.id == key }) { sessions[i].title = t }
             }
+        case "request.cancel":
+            // Timed out, interrupted, or answered somewhere else (the Hermes app, another window).
+            if let id = p["id"] as? String { removePrompt(id) }
         case "error":
             report(RPCError(code: 0, message: p["message"] as? String ?? "Error"))
             if streamingIndex == nil { isBusy = false }
@@ -621,18 +723,20 @@ final class ChatStore {
         }
     }
 
+    /// Window-owned desktop bridges: answering "not shown here" lets the agent move on at once.
+    private static let windowRequests: Set<String> = ["preview.read", "preview.act", "terminal.read", "window.read", "tour"]
+
     private func handleServerRequest(_ id: String, _ method: String, _ params: JSON) {
-        switch method {
-        case "approval":
-            let choices = (params["choices"] as? [String]).flatMap { $0.isEmpty ? nil : $0 } ?? ["once", "deny"]
+        if let prompt = GatewayPrompt(id: id, method: method, params: params) {
+            // A question from a chat that isn't open comes back in its open_requests when it is.
+            if let sid = sessionId, !prompt.sessionId.isEmpty, prompt.sessionId != sid { return }
             withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
-                pendingApproval = ApprovalRequest(id: id,
-                                                  command: params["command"] as? String ?? "",
-                                                  description: params["description"] as? String ?? "Hermes wants to run a command",
-                                                  choices: choices)
+                if let i = prompts.firstIndex(where: { $0.id == id }) { prompts[i] = prompt } else { prompts.append(prompt) }
             }
-        default:
-            gateway.respondError(id: id, code: -32601, message: "Hermes Quick can't answer '\(method)' — use the Hermes app.")
+        } else if Self.windowRequests.contains(method) {
+            gateway.respondError(id: id, code: 4404, message: "Hermes Quick has no window for '\(method)'.")
+        } else {
+            gateway.respondError(id: id, code: -32601, message: "Hermes Quick can't show '\(method)'.")
         }
     }
 

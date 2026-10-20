@@ -85,6 +85,7 @@ struct ComposerView: View {
 
     private var placeholder: String {
         let bot = store.activeBot?.displayName ?? "Hermes"
+        if let q = store.activeQuestion { return q.choices.isEmpty ? "Type your answer…" : "Or type your own answer…" }
         return store.voice.isConversing ? "Voice mode on" : "Ask \(bot)…"
     }
 
@@ -118,11 +119,13 @@ struct ComposerView: View {
     }
 
     private var sendButton: some View {
-        Button {
-            store.isBusy ? store.interrupt() : store.send()
+        // Busy shows Stop, unless the composer is answering one of Hermes's questions.
+        let stops = store.isBusy && !store.canSend
+        return Button {
+            stops ? store.interrupt() : store.send()
         } label: {
-            Image(systemName: store.isBusy ? "stop.fill" : "arrow.up")
-                .font(.system(size: store.isBusy ? 11 : 14, weight: .bold))
+            Image(systemName: stops ? "stop.fill" : "arrow.up")
+                .font(.system(size: stops ? 11 : 14, weight: .bold))
                 .contentTransition(.symbolEffect(.replace))
                 .foregroundStyle(.white)
                 .frame(width: 32, height: 32)
@@ -132,7 +135,7 @@ struct ComposerView: View {
         .scaleEffect(store.canSend || store.isBusy ? 1 : 0.92)
         .animation(.spring(response: 0.3, dampingFraction: 0.6), value: store.canSend)
         .disabled(!store.isBusy && !store.canSend)
-        .help(store.isBusy ? "Stop (⌘.)" : "Send (↩)")
+        .help(stops ? "Stop (⌘.)" : store.activeQuestion != nil ? "Answer (↩)" : "Send (↩)")
     }
 
     private var shortcuts: some View {

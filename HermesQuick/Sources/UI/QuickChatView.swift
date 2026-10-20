@@ -28,6 +28,7 @@ struct QuickChatView: View {
         .opacity(presentation.isPresented ? 1 : 0)
         .blur(radius: presentation.isPresented ? 0 : 6)
         .padding(.top, 28)
+        .padding(.bottom, 24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .animation(.spring(response: 0.42, dampingFraction: 0.84), value: hasConversation)
         .animation(.snappy, value: store.lastError)
@@ -61,16 +62,18 @@ struct QuickChatView: View {
                             .frame(height: 440)
                             .transition(.opacity)
                     } else {
+                        // Shrinks to make room for a question card so the card never outgrows the fixed-size panel.
                         MessageList()
-                            .frame(height: 440)
+                            .frame(minHeight: 160, maxHeight: 440)
                             .transition(.handoff)
                     }
                 }
-                if let approval = store.pendingApproval, !store.showingHistory {
-                    ApprovalCard(request: approval)
+                if let prompt = store.activePrompt, !store.showingHistory {
+                    PromptCard(prompt: prompt)
                         .padding(.horizontal, 14)
                         .padding(.bottom, 8)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        // Grow out of the composer and shrink back into it, never sliding underneath.
+                        .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .bottom)))
                 }
                 if !store.showingHistory {
                     ComposerView()
@@ -386,53 +389,6 @@ struct DragGrabber: View {
             .contentShape(Rectangle())
             .gesture(WindowDragGesture())
             .onHover { h in withAnimation(.easeOut(duration: 0.15)) { hovering = h } }
-    }
-}
-
-// MARK: - Approval
-
-struct ApprovalCard: View {
-    @Environment(ChatStore.self) private var store
-    let request: ApprovalRequest
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label(request.description, systemImage: "hand.raised.fill")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.orange)
-            if !request.command.isEmpty {
-                Text(request.command)
-                    .font(.system(size: 12, design: .monospaced))
-                    .textSelection(.enabled)
-                    .padding(8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.black.opacity(0.18), in: RoundedRectangle(cornerRadius: 8))
-            }
-            HStack {
-                ForEach(request.choices, id: \.self) { choice in
-                    if choice == "deny" {
-                        Button(Self.label(choice)) { store.respondToApproval(choice) }
-                            .buttonStyle(.glass)
-                    } else {
-                        Button(Self.label(choice)) { store.respondToApproval(choice) }
-                            .buttonStyle(.glassProminent)
-                            .tint(.orange)
-                    }
-                }
-            }
-        }
-        .padding(12)
-        .glassEffect(.regular.tint(.orange.opacity(0.12)), in: RoundedRectangle(cornerRadius: 16))
-    }
-
-    static func label(_ c: String) -> String {
-        switch c {
-        case "once": "Allow Once"
-        case "session": "Allow for Session"
-        case "always": "Always Allow"
-        case "deny": "Deny"
-        default: c.capitalized
-        }
     }
 }
 

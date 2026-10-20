@@ -116,11 +116,98 @@ struct ChatMessage: Identifiable, Equatable {
     var date = Date()
 }
 
-struct ApprovalRequest: Identifiable, Equatable {
-    let id: String          // server request id (srq-n)
-    let command: String
-    let description: String
-    let choices: [String]
+/// Something the gateway is waiting on the user for (a server→client request): a command approval,
+/// clarifying questions, or a password / secret / code.
+struct GatewayPrompt: Identifiable, Equatable {
+    enum Kind: Equatable {
+        case approval(command: String, description: String, choices: [String])
+        case clarify([ClarifyQuestion])
+        case secret(SecretPrompt)
+    }
+
+    let id: String          // server request id (srq-…)
+    let method: String
+    let sessionId: String
+    var kind: Kind
+
+    /// Nil for request kinds Hermes Quick can't show.
+    init?(id: String, method: String, params: JSON) {
+        self.id = id
+        self.method = method
+        sessionId = params["session_id"] as? String ?? ""
+        let str = { (key: String) in (params[key] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "" }
+        switch method {
+        case "approval":
+            let choices = (params["choices"] as? [String]).flatMap { $0.isEmpty ? nil : $0 } ?? ["once", "deny"]
+            kind = .approval(command: str("command"),
+                             description: str("description").isEmpty ? "Hermes wants to run a command" : str("description"),
+                             choices: choices)
+        case "clarify":
+            let locked = params["answers"] as? JSON ?? [:]
+            let questions = (params["questions"] as? [JSON] ?? []).compactMap { q -> ClarifyQuestion? in
+                guard let qid = q["qid"] as? String, let text = q["question"] as? String else { return nil }
+                var recommended: Int?
+                let choices = (q["choices"] as? [String] ?? []).enumerated().map { i, c in
+                    guard let r = c.range(of: "(Recommended)", options: [.caseInsensitive, .backwards, .anchored]) else { return c }
+                    recommended = i
+                    return c[..<r.lowerBound].trimmingCharacters(in: .whitespaces)
+                }
+                return ClarifyQuestion(id: qid, question: text, choices: choices, recommended: recommended,
+                                       multiSelect: q["multi_select"] as? Bool ?? false, locked: locked[qid] != nil)
+            }
+            guard questions.contains(where: { !$0.locked }) else { return nil }
+            kind = .clarify(questions)
+        case "sudo":
+            kind = .secret(SecretPrompt(title: "Administrator Password",
+                                        message: "Hermes needs your Mac password to run this with sudo.",
+                                        detail: str("command"), symbol: "lock.shield.fill",
+                                        placeholder: "Password", submit: "Run"))
+        case "secret":
+            let prompt = str("prompt")
+            kind = .secret(SecretPrompt(title: prompt.isEmpty ? "Hermes needs a secret" : prompt,
+                                        message: "It's saved to your Hermes settings, not shown in the chat.",
+                                        detail: str("env_var"), symbol: "key.fill",
+                                        placeholder: "Value", submit: "Save"))
+        case "vault.unlock_prompt":
+            let name = str("display_name").isEmpty ? str("backend") : str("display_name")
+            kind = .secret(SecretPrompt(title: "Unlock \(name)",
+                                        message: "Hermes needs your master password to use logins from \(name) in this chat.",
+                                        symbol: "lock.open.fill", placeholder: "Master password", submit: "Unlock"))
+        case "vault.code":
+            let site = str("site")
+            kind = .secret(SecretPrompt(title: site.isEmpty ? "Verification Code" : "Verification Code for \(site)",
+                                        message: str("hint").isEmpty ? "Enter the code from your device." : str("hint"),
+                                        symbol: "number.square.fill", placeholder: "Code", submit: "Continue", style: .code))
+        case "vault.save_login":
+            let site = str("site").isEmpty ? str("origin") : str("site")
+            kind = .secret(SecretPrompt(title: "Save a Login for \(site)",
+                                        message: "Hermes will use it to sign in. It's stored in your password manager.",
+                                        detail: str("origin"), symbol: "person.badge.key.fill",
+                                        placeholder: "Password", submit: "Save", style: .login))
+        default:
+            return nil
+        }
+    }
+}
+
+struct ClarifyQuestion: Identifiable, Equatable {
+    let id: String          // qid, what `clarify.lock` takes
+    let question: String
+    let choices: [String]   // without the "(Recommended)" label
+    let recommended: Int?
+    let multiSelect: Bool
+    var locked = false
+}
+
+struct SecretPrompt: Equatable {
+    enum Style { case password, code, login }
+    var title: String
+    var message: String
+    var detail = ""         // the command or env var it's for, shown monospaced
+    var symbol: String
+    var placeholder: String
+    var submit: String
+    var style = Style.password
 }
 
 struct BotProfile: Identifiable, Hashable {
