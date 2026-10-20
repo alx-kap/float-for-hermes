@@ -5,12 +5,23 @@ struct MessageList: View {
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 14) {
+            LazyVStack(alignment: .leading, spacing: 0) {
                 // Only the latest exchange can be edited, retried or regenerated (session.undo drops the last turn).
-                let lastUser = store.messages.lastIndex { $0.role == .user }
-                let lastReply = store.messages.lastIndex { $0.role == .assistant }.flatMap { $0 > (lastUser ?? -1) ? $0 : nil }
-                ForEach(Array(store.messages.enumerated()), id: \.element.id) { i, msg in
-                    MessageRow(message: msg, isLatestUser: i == lastUser, isLatestReply: i == lastReply)
+                let messages = store.messages
+                let lastUser = messages.lastIndex { $0.role == .user }
+                let lastReply = messages.lastIndex { $0.role == .assistant }.flatMap { $0 > (lastUser ?? -1) ? $0 : nil }
+                ForEach(Array(messages.enumerated()), id: \.element.id) { i, msg in
+                    let prev = i > 0 ? messages[i - 1] : nil
+                    let next = i + 1 < messages.count ? messages[i + 1] : nil
+                    let stamp = TimeDivider.shows(msg, after: prev)
+                    // Like Messages: your messages in a row sit close together, and only the last one has a tail.
+                    let joinsPrevious = !stamp && prev?.role == .user && msg.role == .user
+                    let endsRun = !(next?.role == .user && msg.role == .user && !TimeDivider.shows(next!, after: msg))
+                    VStack(spacing: 0) {
+                        if stamp { TimeDivider(date: msg.date).padding(.top, i == 0 ? 0 : 6).padding(.bottom, 10) }
+                        MessageRow(message: msg, isLatestUser: i == lastUser, isLatestReply: i == lastReply, hasTail: endsRun)
+                    }
+                    .padding(.top, i == 0 ? 0 : joinsPrevious ? 3 : 14)
                         .id(msg.id)
                         .transition(.asymmetric(
                             insertion: .move(edge: .bottom).combined(with: .opacity).combined(with: .scale(scale: 0.98, anchor: .bottom)),
@@ -18,9 +29,10 @@ struct MessageList: View {
                 }
                 if !store.status.isEmpty {
                     Label(store.status, systemImage: "sparkle")
-                        .font(.system(size: 12))
+                        .font(.app(12))
                         .foregroundStyle(.secondary)
                         .symbolEffect(.pulse)
+                        .padding(.top, 14)
                         .transition(.opacity)
                 }
             }
@@ -42,6 +54,7 @@ struct MessageRow: View {
     let message: ChatMessage
     var isLatestUser = false
     var isLatestReply = false
+    var hasTail = true
     @State private var hovering = false
 
     private var isEditing: Bool { store.editingMessageId == message.id }
@@ -68,7 +81,7 @@ struct MessageRow: View {
             }
             if isEditing {
                 Label("Editing", systemImage: "pencil")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.app(11, weight: .medium))
                     .foregroundStyle(.secondary)
                     .transition(.opacity)
             } else if message.queued {
@@ -78,7 +91,7 @@ struct MessageRow: View {
                     Button("Cancel") { store.cancelQueuedSend() }
                         .buttonStyle(.link)
                 }
-                .font(.system(size: 11.5, weight: .medium))
+                .font(.app(11.5, weight: .medium))
                 .transition(.opacity.combined(with: .move(edge: .top)))
             } else if message.failed && isLatestUser {
                 HStack(spacing: 6) {
@@ -88,7 +101,7 @@ struct MessageRow: View {
                         .buttonStyle(.link)
                         .disabled(!store.canRegenerate)
                 }
-                .font(.system(size: 11.5, weight: .medium))
+                .font(.app(11.5, weight: .medium))
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
@@ -118,7 +131,7 @@ struct MessageRow: View {
                 HStack(spacing: 4) {
                     ForEach(message.attachments, id: \.self) { name in
                         Label(name, systemImage: "paperclip")
-                            .font(.system(size: 11))
+                            .font(.app(11))
                             .lineLimit(1)
                             .padding(.horizontal, 8).padding(.vertical, 3)
                             .background(.white.opacity(0.18), in: Capsule())
@@ -127,7 +140,7 @@ struct MessageRow: View {
             }
             if !message.text.isEmpty {
                 Text(message.text)
-                    .font(.system(size: 14))
+                    .font(.app(14))
                     .textSelection(.enabled)
             }
         }
@@ -137,7 +150,8 @@ struct MessageRow: View {
         .background(
             LinearGradient(colors: [Color.accentColor, Color.accentColor.opacity(0.82)],
                            startPoint: .top, endPoint: .bottom),
-            in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            in: BubbleShape(tail: hasTail))
+        .padding(.trailing, 5)  // room for the tail, kept for every bubble so a run lines up
         .opacity(isEditing ? 0.45 : 1)
     }
 
@@ -199,6 +213,50 @@ struct MessageRow: View {
     }
 }
 
+/// A Messages-style bubble: rounded, with a tail curling off the bottom-right corner.
+struct BubbleShape: Shape {
+    var tail: Bool
+
+    func path(in rect: CGRect) -> Path {
+        let body = Path(roundedRect: rect, cornerRadius: 18, style: .continuous)
+        guard tail else { return body }
+        let x = rect.maxX, y = rect.maxY
+        var t = Path()
+        t.move(to: CGPoint(x: x - 2, y: y - 18))
+        t.addCurve(to: CGPoint(x: x + 5, y: y), control1: CGPoint(x: x - 1, y: y - 7), control2: CGPoint(x: x + 1.5, y: y - 2))
+        t.addCurve(to: CGPoint(x: x - 15, y: y - 3), control1: CGPoint(x: x - 2, y: y + 0.5), control2: CGPoint(x: x - 9, y: y))
+        t.closeSubpath()
+        return body.union(t)
+    }
+}
+
+/// "Today 9:41 AM" between messages, like Messages: before the first one and after a long gap.
+struct TimeDivider: View {
+    let date: Date
+
+    static func shows(_ msg: ChatMessage, after prev: ChatMessage?) -> Bool {
+        guard let prev else { return true }
+        return msg.date.timeIntervalSince(prev.date) > 15 * 60
+    }
+
+    var body: some View {
+        (Text(day).fontWeight(.semibold) + Text(" ") + Text(date, format: .dateTime.hour().minute()))
+            .font(.app(11))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity)
+    }
+
+    private var day: String {
+        let cal = Calendar.current
+        if cal.isDateInToday(date) { return "Today" }
+        if cal.isDateInYesterday(date) { return "Yesterday" }
+        if let days = cal.dateComponents([.day], from: cal.startOfDay(for: date), to: cal.startOfDay(for: .now)).day, days < 7 {
+            return date.formatted(.dateTime.weekday(.wide))
+        }
+        return date.formatted(.dateTime.month(.abbreviated).day().year(cal.isDate(date, equalTo: .now, toGranularity: .year) ? .omitted : .defaultDigits))
+    }
+}
+
 /// A small borderless icon button shown on hover next to a message.
 struct MessageAction: View {
     let symbol: String
@@ -210,7 +268,7 @@ struct MessageAction: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 11.5, weight: .medium))
+                .font(.app(11.5, weight: .medium))
                 .frame(width: 24, height: 22)
                 .background(.primary.opacity(hovering && isEnabled ? 0.08 : 0), in: RoundedRectangle(cornerRadius: 6))
                 .contentShape(Rectangle())
@@ -234,7 +292,7 @@ struct ToolStrip: View {
                     withAnimation(.snappy) { expanded.toggle() }
                 }
                 .buttonStyle(.plain)
-                .font(.system(size: 11, weight: .medium))
+                .font(.app(11, weight: .medium))
                 .foregroundStyle(.secondary)
             }
             ForEach(shown) { tool in
@@ -261,18 +319,18 @@ struct ToolChip: View {
                         .foregroundStyle(.tint)
                 }
             }
-            .font(.system(size: 11, weight: .semibold))
+            .font(.app(11, weight: .semibold))
             .frame(width: 14)
             Text(tool.prettyName)
-                .font(.system(size: 12, weight: .medium))
+                .font(.app(12, weight: .medium))
             Text(tool.done && !tool.summary.isEmpty ? tool.summary : tool.preview)
-                .font(.system(size: 11))
+                .font(.app(11))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
             if let d = tool.duration {
                 Text(String(format: "%.1fs", d))
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(.app(10, design: .monospaced))
                     .foregroundStyle(.tertiary)
             }
         }
@@ -300,14 +358,14 @@ struct ShimmerText: View {
         TimelineView(.animation) { ctx in
             let phase = ctx.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.6) / 1.6
             Text(text)
-                .font(.system(size: 14, weight: .medium))
+                .font(.app(14, weight: .medium))
                 .foregroundStyle(.secondary)
                 .overlay {
                     LinearGradient(stops: [.init(color: .clear, location: phase - 0.25),
                                            .init(color: .primary, location: phase),
                                            .init(color: .clear, location: phase + 0.25)],
                                    startPoint: .leading, endPoint: .trailing)
-                        .mask(Text(text).font(.system(size: 14, weight: .medium)))
+                        .mask(Text(text).font(.app(14, weight: .medium)))
                 }
         }
     }
@@ -326,12 +384,12 @@ struct CommandOutputCard: View {
             Group {
                 if isError {
                     Label(text, systemImage: "exclamationmark.triangle.fill")
-                        .font(.system(size: 12.5))
+                        .font(.app(12.5))
                         .foregroundStyle(.red)
                 } else {
                     ScrollView(.horizontal, showsIndicators: false) {
                         Text(long && !expanded ? lines.prefix(14).joined(separator: "\n") : text)
-                            .font(.system(size: 11.5, design: .monospaced))
+                            .font(.app(11.5, design: .monospaced))
                             .textSelection(.enabled)
                             .fixedSize()
                     }
@@ -342,7 +400,7 @@ struct CommandOutputCard: View {
                     withAnimation(.snappy) { expanded.toggle() }
                 }
                 .buttonStyle(.plain)
-                .font(.system(size: 11, weight: .medium))
+                .font(.app(11, weight: .medium))
                 .foregroundStyle(.tint)
             }
         }

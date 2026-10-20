@@ -33,19 +33,19 @@ struct MarkdownView: View {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         if let level = Self.headingLevel(trimmed) {
             Text(Self.inline(String(trimmed.drop(while: { $0 == "#" }).drop(while: { $0 == " " }))))
-                .font(.system(size: level == 1 ? 18 : level == 2 ? 16 : 14.5, weight: .semibold))
+                .font(.app(level == 1 ? 18 : level == 2 ? 16 : 14.5, weight: .semibold))
                 .padding(.top, 4)
         } else if let item = Self.bullet(trimmed) {
             let indent = CGFloat(line.prefix(while: { $0 == " " }).count / 2) * 14
             HStack(alignment: .firstTextBaseline, spacing: 7) {
-                Text(item.marker).foregroundStyle(.secondary).font(.system(size: 14))
-                Text(Self.inline(item.text)).font(.system(size: 14))
+                Text(item.marker).foregroundStyle(.secondary).font(.app(14))
+                Text(Self.inline(item.text)).font(.app(14))
             }
             .padding(.leading, indent)
         } else if trimmed == "---" || trimmed == "***" {
             Divider().padding(.vertical, 2)
         } else {
-            Text(Self.inline(line)).font(.system(size: 14)).lineSpacing(2)
+            Text(Self.inline(line)).font(.app(14)).lineSpacing(2)
         }
     }
 
@@ -241,7 +241,7 @@ struct MarkdownView: View {
         var a = (try? AttributedString(markdown: s, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
             ?? AttributedString(s)
         for run in a.runs where run.inlinePresentationIntent?.contains(.code) == true {
-            a[run.range].font = .system(size: 13, design: .monospaced)
+            a[run.range].font = .app(13, design: .monospaced)
             a[run.range].backgroundColor = Color.primary.opacity(0.08)
         }
         return a
@@ -257,7 +257,7 @@ struct CodeBlock: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text(language.isEmpty ? "code" : language)
-                    .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                    .font(.app(10.5, weight: .semibold, design: .monospaced))
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button {
@@ -267,7 +267,7 @@ struct CodeBlock: View {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { withAnimation { copied = false } }
                 } label: {
                     Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
-                        .font(.system(size: 10.5, weight: .medium))
+                        .font(.app(10.5, weight: .medium))
                         .contentTransition(.symbolEffect(.replace))
                 }
                 .buttonStyle(.plain)
@@ -277,7 +277,7 @@ struct CodeBlock: View {
             .padding(.vertical, 6)
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(SyntaxHighlighter.highlight(code, language: language))
-                    .font(.system(size: 12.5, design: .monospaced))
+                    .font(.app(12.5, design: .monospaced))
                     .padding(.horizontal, 12)
                     .padding(.bottom, 10)
                     .fixedSize()
@@ -318,7 +318,7 @@ struct TableBlock: View {
     private func cell(_ text: String, column: Int) -> some View {
         let alignment = table.alignments[column]
         return Text(MarkdownView.inline(text))
-            .font(.system(size: 13))
+            .font(.app(13))
             .multilineTextAlignment(alignment == .trailing ? .trailing : alignment == .center ? .center : .leading)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: 280, alignment: Alignment(horizontal: alignment, vertical: .center))
@@ -340,7 +340,7 @@ struct QuoteBlock: View {
             VStack(alignment: .leading, spacing: 4) {
                 if let callout {
                     Label(callout.title, systemImage: callout.symbol)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.app(13, weight: .semibold))
                         .foregroundStyle(callout.color)
                 }
                 if !markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

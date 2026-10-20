@@ -49,6 +49,21 @@ struct SettingsView: View {
                 Picker("Shortcut", selection: $prefs.hotKey) {
                     ForEach(HotKeyPreset.allCases) { Text($0.label).tag($0) }
                 }
+                LabeledContent("Text size") {
+                    HStack(spacing: 8) {
+                        Text("A").font(.system(size: 11))
+                        Slider(value: Binding(
+                            get: { Double(Preferences.textScales.firstIndex { $0 >= prefs.textScale - 0.001 } ?? 1) },
+                            set: { prefs.textScale = Preferences.textScales[Int($0.rounded())] }),
+                               in: 0...Double(Preferences.textScales.count - 1), step: 1)
+                            .frame(width: 160)
+                        Text("A").font(.system(size: 17))
+                        Text("\(Int((prefs.textScale * 100).rounded()))%")
+                            .font(.system(size: 11)).foregroundStyle(.secondary).monospacedDigit()
+                            .frame(width: 36, alignment: .trailing)
+                    }
+                }
+                .help("Also ⌘+ and ⌘− in the panel, and ⌘0 to reset")
                 Toggle("Launch at login", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, on in
                         do { on ? try SMAppService.mainApp.register() : try SMAppService.mainApp.unregister() }

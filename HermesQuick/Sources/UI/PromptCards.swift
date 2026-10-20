@@ -28,11 +28,11 @@ struct ApprovalCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Label(description, systemImage: "hand.raised.fill")
-                .font(.system(size: 13, weight: .semibold))
+                .font(.app(13, weight: .semibold))
                 .foregroundStyle(.orange)
             if !command.isEmpty {
                 Text(command)
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(.app(12, design: .monospaced))
                     .textSelection(.enabled)
                     .padding(8)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -85,11 +85,11 @@ struct ClarifyCard: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 6) {
                     Label("Hermes is asking", systemImage: "questionmark.bubble.fill")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.app(12, weight: .semibold))
                         .foregroundStyle(.tint)
                     if questions.count > 1 {
                         Text("\(position) of \(questions.count)")
-                            .font(.system(size: 11, weight: .medium))
+                            .font(.app(11, weight: .medium))
                             .foregroundStyle(.secondary)
                             .monospacedDigit()
                             .contentTransition(.numericText())
@@ -97,7 +97,7 @@ struct ClarifyCard: View {
                     Spacer()
                     Button { store.cancelClarify() } label: {
                         Image(systemName: "xmark")
-                            .font(.system(size: 10, weight: .bold))
+                            .font(.app(10, weight: .bold))
                             .frame(width: 20, height: 20)
                             .contentShape(Circle())
                     }
@@ -111,7 +111,7 @@ struct ClarifyCard: View {
                 ZStack(alignment: .topLeading) {
                     VStack(alignment: .leading, spacing: 10) {
                         Text(q.question)
-                            .font(.system(size: 14, weight: .medium))
+                            .font(.app(14, weight: .medium))
                             .lineLimit(8)
                             .fixedSize(horizontal: false, vertical: true)
                             .textSelection(.enabled)
@@ -129,7 +129,7 @@ struct ClarifyCard: View {
 
                         HStack(spacing: 8) {
                             Text(hint(q))
-                                .font(.system(size: 11))
+                                .font(.app(11))
                                 .foregroundStyle(.tertiary)
                             Spacer()
                             Button("Skip") { store.answerClarify(nil) }
@@ -174,24 +174,24 @@ private struct ChoiceRow: View {
             HStack(spacing: 10) {
                 if multi {
                     Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 15))
+                        .font(.app(15))
                         .foregroundStyle(selected ? Color.accentColor : .secondary)
                         .contentTransition(.symbolEffect(.replace))
                 }
                 Text(label)
-                    .font(.system(size: 13))
+                    .font(.app(13))
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
                 if recommended {
                     Text("Recommended")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.app(10, weight: .semibold))
                         .foregroundStyle(.tint)
                         .padding(.horizontal, 6).padding(.vertical, 2)
                         .background(Color.accentColor.opacity(0.14), in: Capsule())
                 }
                 Spacer(minLength: 8)
                 Text("⌘\(index + 1)")
-                    .font(.system(size: 10.5, weight: .medium, design: .rounded))
+                    .font(.app(10.5, weight: .medium, design: .rounded))
                     .foregroundStyle(.tertiary)
             }
             .padding(.horizontal, 10)
@@ -227,21 +227,21 @@ struct SecretCard: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: prompt.symbol)
-                    .font(.system(size: 18))
+                    .font(.app(18))
                     .foregroundStyle(.tint)
                     .frame(width: 24)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(prompt.title)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.app(13, weight: .semibold))
                     Text(prompt.message)
-                        .font(.system(size: 12))
+                        .font(.app(12))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
             if !prompt.detail.isEmpty {
                 Text(prompt.detail)
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(.app(12, design: .monospaced))
                     .textSelection(.enabled)
                     .lineLimit(4)
                     .padding(8)
@@ -260,7 +260,7 @@ struct SecretCard: View {
                     if prompt.style == .code {
                         TextField(prompt.placeholder, text: $value)
                             .textContentType(.oneTimeCode)
-                            .font(.system(size: 14, design: .monospaced))
+                            .font(.app(14, design: .monospaced))
                     } else {
                         SecureField(prompt.placeholder, text: $value)
                             .textContentType(.password)
@@ -307,7 +307,7 @@ private struct PromptFieldStyle: ViewModifier {
     func body(content: Content) -> some View {
         content
             .textFieldStyle(.plain)
-            .font(.system(size: 14))
+            .font(.app(14))
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
             .glassEffect(.regular, in: Capsule())

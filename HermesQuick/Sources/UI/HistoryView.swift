@@ -13,11 +13,11 @@ struct HistoryView: View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.app(14, weight: .medium))
                     .foregroundStyle(.secondary)
                 TextField("Search chats", text: $store.historyQuery)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 15))
+                    .font(.app(15))
                     .focused($searchFocused)
                 if store.isLoadingSessions && !store.sessions.isEmpty {
                     ProgressView().controlSize(.mini)
@@ -53,7 +53,7 @@ struct HistoryView: View {
                 Spacer()
                 Text(countLabel(results.count))
             }
-            .font(.system(size: 10.5))
+            .font(.app(10.5))
             .foregroundStyle(.tertiary)
             .padding(.horizontal, 18)
             .padding(.vertical, 8)
@@ -121,14 +121,14 @@ struct HistoryRow: View {
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: isCurrent ? "bubble.left.fill" : "bubble.left")
-                .font(.system(size: 11, weight: .semibold))
+                .font(.app(11, weight: .semibold))
                 .foregroundStyle(selected ? Color.white : isCurrent ? Color.accentColor : Color.secondary)
                 .frame(width: 24, height: 24)
                 .background(selected ? Color.accentColor : Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 7))
 
             if confirmingDelete {
                 Text("Delete “\(session.displayTitle)”?")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.app(13, weight: .semibold))
                     .lineLimit(1)
                 Spacer(minLength: 8)
                 Button("Cancel", action: onCancelDelete)
@@ -142,11 +142,11 @@ struct HistoryRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(session.displayTitle)
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.app(13, weight: .semibold))
                             .lineLimit(1)
                         if let source = session.sourceLabel {
                             Text(source)
-                                .font(.system(size: 9.5, weight: .semibold))
+                                .font(.app(9.5, weight: .semibold))
                                 .foregroundStyle(.secondary)
                                 .padding(.horizontal, 5).padding(.vertical, 1)
                                 .background(.primary.opacity(0.08), in: Capsule())
@@ -154,7 +154,7 @@ struct HistoryRow: View {
                     }
                     if let detail {
                         Text(detail)
-                            .font(.system(size: 12))
+                            .font(.app(12))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
@@ -165,7 +165,7 @@ struct HistoryRow: View {
                         .transition(.opacity)
                 }
                 Text(isCurrent ? "Open" : session.dateLabel)
-                    .font(.system(size: 11))
+                    .font(.app(11))
                     .foregroundStyle(isCurrent ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.tertiary))
                     .monospacedDigit()
             }
@@ -187,7 +187,7 @@ struct HistoryRow: View {
     private var actionsMenu: some View {
         Menu { menuItems } label: {
             Image(systemName: "ellipsis")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.app(12, weight: .semibold))
                 .frame(width: 22, height: 22)
                 .contentShape(Circle())
         }
@@ -213,7 +213,7 @@ struct KeyHint: View {
     let label: String
     var body: some View {
         HStack(spacing: 3) {
-            Text(key).font(.system(size: 10, weight: .semibold, design: .rounded))
+            Text(key).font(.app(10, weight: .semibold, design: .rounded))
                 .padding(.horizontal, 4).padding(.vertical, 1)
                 .background(.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
             Text(label)

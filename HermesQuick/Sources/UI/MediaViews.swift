@@ -55,7 +55,7 @@ struct RemoteImageTile: View {
                     .transition(.opacity.combined(with: .scale(scale: 0.97)))
             } else if let failed {
                 Label(failed, systemImage: "photo.badge.exclamationmark")
-                    .font(.system(size: 11))
+                    .font(.app(11))
                     .foregroundStyle(.secondary)
                     .padding(10)
                     .frame(width: width, height: 70)
@@ -92,7 +92,7 @@ struct RemoteImageTile: View {
     private func tileButton(_ symbol: String, _ help: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 11, weight: .semibold))
+                .font(.app(11, weight: .semibold))
                 .frame(width: 26, height: 26)
         }
         .buttonStyle(.plain)
@@ -129,7 +129,7 @@ struct FileChip: View {
                 else { Image(systemName: failed ? "exclamationmark.triangle" : "doc.fill") }
                 Text(ref.name).lineLimit(1)
             }
-            .font(.system(size: 12, weight: .medium))
+            .font(.app(12, weight: .medium))
             .padding(.horizontal, 10).padding(.vertical, 5)
         }
         .buttonStyle(.plain)

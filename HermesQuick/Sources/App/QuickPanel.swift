@@ -6,6 +6,8 @@ import SwiftUI
 final class PanelPresentation {
     var isPresented = false
     var focusToken = 0
+    /// Set by the controller: refit the window to the card's saved size.
+    @ObservationIgnored var refit: () -> Void = {}
 }
 
 /// A borderless, transparent floating panel (Spotlight-style). The window is fixed-size and
@@ -15,7 +17,7 @@ final class QuickPanel: NSPanel {
     var onCancel: (() -> Void)?
 
     init(content: some View) {
-        super.init(contentRect: NSRect(x: 0, y: 0, width: 760, height: 720),
+        super.init(contentRect: NSRect(origin: .zero, size: Self.fittingSize()),
                    styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView],
                    backing: .buffered, defer: false)
         isFloatingPanel = true
@@ -34,6 +36,13 @@ final class QuickPanel: NSPanel {
         host.wantsLayer = true
         host.layer?.backgroundColor = .clear
         contentView = host
+    }
+
+    /// The transparent window is the card plus room for its shadow, the error pill and cards that grow
+    /// the content; the message list shrinks to fit before anything can overflow (see QuickChatView).
+    static func fittingSize() -> NSSize {
+        let prefs = Preferences.shared
+        return NSSize(width: prefs.panelWidth + 80, height: prefs.listHeight + 280)
     }
 
     override var canBecomeKey: Bool { true }
@@ -56,6 +65,7 @@ final class PanelController {
             .environment(presentation)
         panel = QuickPanel(content: root)
         panel.onCancel = { [weak self] in self?.hide() }
+        presentation.refit = { [weak self] in self?.refit() }
         // ⌘V with a copied file or image attaches it instead of pasting text.
         pasteMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self, weak store] event in
             guard let self, let store, event.window === self.panel else { return event }
@@ -143,6 +153,16 @@ final class PanelController {
         }
         hideWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.22, execute: work)
+    }
+
+    /// Resize the window to the card's saved size, keeping its top edge and horizontal centre in place,
+    /// so dragging either side grows the card evenly like Spotlight.
+    private func refit() {
+        let size = QuickPanel.fittingSize()
+        let old = panel.frame
+        guard old.size != size else { return }
+        panel.setFrame(NSRect(x: (old.midX - size.width / 2).rounded(), y: old.maxY - size.height,
+                              width: size.width, height: size.height), display: true)
     }
 
     /// Reuse the spot the panel was last dragged to; otherwise centre it on the screen with the mouse.

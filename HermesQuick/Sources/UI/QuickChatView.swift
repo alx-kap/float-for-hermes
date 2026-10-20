@@ -7,7 +7,9 @@ struct QuickChatView: View {
     @State private var isDropTargeted = false
     @Namespace private var glass
 
-    private let cardWidth: CGFloat = 680
+    private var prefs: Preferences { Preferences.shared }
+    private var cardWidth: CGFloat { prefs.panelWidth }
+    private var listHeight: CGFloat { prefs.listHeight }
     private var hasConversation: Bool {
         !store.messages.isEmpty || store.voice.isConversing || store.showingHistory || store.isOpeningSession
     }
@@ -35,6 +37,8 @@ struct QuickChatView: View {
         .onChange(of: store.showingHistory) { _, showing in
             if !showing { presentation.focusToken += 1 }
         }
+        .onChange(of: prefs.panelWidth) { presentation.refit() }
+        .onChange(of: prefs.listHeight) { presentation.refit() }
     }
 
     @ViewBuilder
@@ -49,7 +53,7 @@ struct QuickChatView: View {
                         .transition(.move(edge: .top).combined(with: .opacity))
                     if store.showingHistory {
                         HistoryView()
-                            .frame(height: 440)
+                            .frame(height: listHeight)
                             .transition(.handoff)
                     } else if store.voice.isConversing {
                         VoiceStage()
@@ -59,12 +63,12 @@ struct QuickChatView: View {
                         ProgressView()
                             .controlSize(.small)
                             .frame(maxWidth: .infinity)
-                            .frame(height: 440)
+                            .frame(height: listHeight)
                             .transition(.opacity)
                     } else {
                         // Shrinks to make room for a question card so the card never outgrows the fixed-size panel.
                         MessageList()
-                            .frame(minHeight: 160, maxHeight: 440)
+                            .frame(minHeight: 160, maxHeight: listHeight)
                             .transition(.handoff)
                     }
                 }
@@ -93,6 +97,8 @@ struct QuickChatView: View {
         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
         .glassEffectID("card", in: glass)
         .shadow(color: .black.opacity(0.28), radius: 30, y: 16)
+        // Grab strips straddle the card's edge (half outside, in the window's transparent margin).
+        .overlay { if store.auth.isSignedIn { ResizeHandles(vertical: hasConversation && !store.voice.isConversing).padding(-ResizeHandles.overhang) } }
         .onDrop(of: [.fileURL, .image], isTargeted: $isDropTargeted.animation(.snappy)) { providers in
             loadDrop(providers)
             return true
@@ -392,7 +398,84 @@ struct DragGrabber: View {
             .padding(.horizontal, 20)
             .contentShape(Rectangle())
             .gesture(WindowDragGesture())
+            .simultaneousGesture(TapGesture(count: 2).onEnded {
+                // Double-click puts the panel back to its standard size. Not animated: the window refits at
+                // once, and a card still animating down from a bigger size would overflow it.
+                Preferences.shared.panelWidth = Preferences.defaultPanelWidth
+                Preferences.shared.listHeight = Preferences.defaultListHeight
+            })
             .onHover { h in withAnimation(.easeOut(duration: 0.15)) { hovering = h } }
+            .help("Drag to move. Double-click to reset the size.")
+    }
+}
+
+/// Invisible strips along the card's sides and bottom. Dragging a side widens the card evenly
+/// (the panel stays centred); dragging the bottom makes the message list taller.
+struct ResizeHandles: View {
+    /// Bottom edge and corners only when there's a message list to grow.
+    let vertical: Bool
+    @State private var start: (mouse: NSPoint, width: Double, height: Double)?
+
+    private enum Edge { case left, right, bottom, bottomLeft, bottomRight }
+
+    /// How far the strips reach past the card; they reach the same distance in.
+    static let overhang: CGFloat = 8
+    private let thickness = overhang * 2
+    private let corner: CGFloat = 36
+
+    var body: some View {
+        ZStack {
+            handle(.left).frame(width: thickness).frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 30).padding(.bottom, vertical ? corner : 30)
+            handle(.right).frame(width: thickness).frame(maxWidth: .infinity, alignment: .trailing)
+                .padding(.top, 30).padding(.bottom, vertical ? corner : 30)
+            if vertical {
+                handle(.bottom).frame(height: thickness).frame(maxHeight: .infinity, alignment: .bottom).padding(.horizontal, corner)
+                handle(.bottomLeft).frame(width: corner, height: corner).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                handle(.bottomRight).frame(width: corner, height: corner).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+            }
+        }
+    }
+
+    private func handle(_ edge: Edge) -> some View {
+        // Not fully clear: the panel lets clicks through where nothing is drawn, and these sit partly
+        // over that transparent margin.
+        Color.black.opacity(0.002)
+            .contentShape(Rectangle())
+            .pointerStyle(.frameResize(position: position(edge)))
+            .gesture(DragGesture(minimumDistance: 1)
+                .onChanged { _ in drag(edge) }
+                .onEnded { _ in start = nil })
+    }
+
+    private func position(_ edge: Edge) -> FrameResizePosition {
+        switch edge {
+        case .left: .leading
+        case .right: .trailing
+        case .bottom: .bottom
+        case .bottomLeft: .bottomLeading
+        case .bottomRight: .bottomTrailing
+        }
+    }
+
+    /// Works in screen coordinates: the window itself moves while it resizes.
+    private func drag(_ edge: Edge) {
+        let prefs = Preferences.shared
+        let mouse = NSEvent.mouseLocation
+        if start == nil { start = (mouse, prefs.panelWidth, prefs.listHeight) }
+        guard let start else { return }
+        let dx = mouse.x - start.mouse.x
+        let dy = start.mouse.y - mouse.y
+        let screen = (NSApp.keyWindow?.screen ?? NSScreen.main)?.visibleFrame ?? .init(x: 0, y: 0, width: 1440, height: 900)
+        var width = start.width, height = start.height
+        switch edge {
+        case .left, .bottomLeft: width -= 2 * dx
+        case .right, .bottomRight: width += 2 * dx
+        case .bottom: break
+        }
+        if edge == .bottom || edge == .bottomLeft || edge == .bottomRight { height += dy }
+        prefs.panelWidth = min(max(width, 520), screen.width - 120).rounded()
+        prefs.listHeight = min(max(height, 240), screen.height - 340).rounded()
     }
 }
 

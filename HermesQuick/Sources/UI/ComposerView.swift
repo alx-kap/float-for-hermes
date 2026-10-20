@@ -20,7 +20,7 @@ struct ComposerView: View {
                         .buttonStyle(.link)
                         .help("Cancel (esc)")
                 }
-                .font(.system(size: 11.5, weight: .medium))
+                .font(.app(11.5, weight: .medium))
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 4)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -53,7 +53,7 @@ struct ComposerView: View {
                         HStack(spacing: 10) {
                             LevelBars(level: voice.level)
                             Text(voice.transcript.isEmpty ? "Listening…" : voice.transcript)
-                                .font(.system(size: 17))
+                                .font(.app(17))
                                 .foregroundStyle(voice.transcript.isEmpty ? .secondary : .primary)
                                 .lineLimit(3)
                                 .contentTransition(.opacity)
@@ -63,7 +63,7 @@ struct ComposerView: View {
                     } else {
                         TextField(placeholder, text: $store.draft, axis: .vertical)
                             .textFieldStyle(.plain)
-                            .font(.system(size: 17))
+                            .font(.app(17))
                             .lineLimit(1...8)
                             .focused($focused)
                             .onSubmit { store.send() }
@@ -109,7 +109,7 @@ struct ComposerView: View {
         let listening = store.voice.isListening && !store.voice.isConversing
         return Button { store.voice.toggleDictation() } label: {
             Image(systemName: listening ? "waveform" : "mic")
-                .font(.system(size: 14, weight: .semibold))
+                .font(.app(14, weight: .semibold))
                 .symbolEffect(.variableColor.iterative, isActive: listening)
                 .contentTransition(.symbolEffect(.replace))
                 .frame(width: 32, height: 32)
@@ -124,7 +124,7 @@ struct ComposerView: View {
     private var conversationButton: some View {
         Button { store.voice.toggleConversation() } label: {
             Image(systemName: store.voice.isConversing ? "xmark" : "waveform.circle.fill")
-                .font(.system(size: store.voice.isConversing ? 13 : 17, weight: .semibold))
+                .font(.app(store.voice.isConversing ? 13 : 17, weight: .semibold))
                 .contentTransition(.symbolEffect(.replace))
                 .frame(width: 32, height: 32)
         }
@@ -141,7 +141,7 @@ struct ComposerView: View {
             stops ? store.interrupt() : store.send()
         } label: {
             Image(systemName: stops ? "stop.fill" : "arrow.up")
-                .font(.system(size: stops ? 11 : 14, weight: .bold))
+                .font(.app(stops ? 11 : 14, weight: .bold))
                 .contentTransition(.symbolEffect(.replace))
                 .foregroundStyle(.white)
                 .frame(width: 32, height: 32)
@@ -163,6 +163,10 @@ struct ComposerView: View {
             Button("") { store.voice.toggleConversation() }.keyboardShortcut("d", modifiers: [.command, .shift])
             Button("") { store.chooseFiles(over: NSApp.keyWindow) }.keyboardShortcut("o", modifiers: .command)
             Button("") { store.regenerate() }.keyboardShortcut("r", modifiers: .command)
+            Button("") { Preferences.shared.stepTextSize(1) }.keyboardShortcut("=", modifiers: .command)
+            Button("") { Preferences.shared.stepTextSize(1) }.keyboardShortcut("+", modifiers: .command)
+            Button("") { Preferences.shared.stepTextSize(-1) }.keyboardShortcut("-", modifiers: .command)
+            Button("") { Preferences.shared.textScale = 1 }.keyboardShortcut("0", modifiers: .command)
         }
         .opacity(0)
         .frame(width: 0, height: 0)
@@ -199,7 +203,7 @@ struct SlashMenu: View {
                 Spacer()
                 Text("\(store.slashItems.count) command\(store.slashItems.count == 1 ? "" : "s")")
             }
-            .font(.system(size: 10.5))
+            .font(.app(10.5))
             .foregroundStyle(.tertiary)
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
@@ -209,7 +213,7 @@ struct SlashMenu: View {
 
     private func hint(_ key: String, _ label: String) -> some View {
         HStack(spacing: 3) {
-            Text(key).font(.system(size: 10, weight: .semibold, design: .rounded))
+            Text(key).font(.app(10, weight: .semibold, design: .rounded))
                 .padding(.horizontal, 4).padding(.vertical, 1)
                 .background(.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
             Text(label)
@@ -224,14 +228,14 @@ struct SlashRow: View {
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: item.kind == "skill" ? "sparkles" : "command")
-                .font(.system(size: 11, weight: .semibold))
+                .font(.app(11, weight: .semibold))
                 .foregroundStyle(selected ? Color.white : Color.secondary)
                 .frame(width: 22, height: 22)
                 .background(selected ? Color.accentColor : Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 6))
             Text(item.display)
-                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                .font(.app(13, weight: .semibold, design: .monospaced))
             Text(item.meta)
-                .font(.system(size: 12))
+                .font(.app(12))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.tail)
@@ -262,11 +266,11 @@ struct AttachmentChip: View {
                     .resizable().frame(width: 22, height: 22)
             }
             Text(attachment.name)
-                .font(.system(size: 12, weight: .medium))
+                .font(.app(12, weight: .medium))
                 .lineLimit(1)
                 .frame(maxWidth: 160)
             Button(action: remove) {
-                Image(systemName: "xmark.circle.fill").font(.system(size: 12))
+                Image(systemName: "xmark.circle.fill").font(.app(12))
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
