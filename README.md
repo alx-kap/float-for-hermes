@@ -28,6 +28,7 @@ This builds a Release copy into `~/Applications/Hermes Quick.app` and launches i
 - **Sign-in:** the same RFC 8252 browser + PKCE flow the Hermes desktop app uses. Your password only goes into the gateway's own login page. Tokens are stored in the Keychain and refresh automatically.
 - **Bots and models:** the header pills switch between Hermes profiles (`profiles.list`) and models (`model.options` / `config.set model`).
 - **Voice:** Apple's on-device `SpeechAnalyzer`/`SpeechTranscriber` for listening, and the macOS system voice for spoken replies. In voice mode it listens, sends when you pause, speaks the reply, then listens again. Tap the orb to interrupt. For a more natural voice, set System Settings › Accessibility › Read & Speak › System voice to a Siri voice. macOS hides Siri voices from third-party speech APIs, so replies are spoken through the system voice (`/usr/bin/say`).
+- **Images and files from Hermes:** when a reply mentions a file on the gateway (a path, `MEDIA:` line or Markdown image) or an image URL, it is downloaded with your sign-in and shown inline. Hover or right-click to save or open in Preview; other files appear as chips that download and open.
 - **Approvals:** when Hermes asks to run a risky command, an inline card lets you allow or deny it.
 
 ## Layout

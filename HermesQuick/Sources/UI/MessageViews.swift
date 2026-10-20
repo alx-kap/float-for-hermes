@@ -103,6 +103,10 @@ struct MessageRow: View {
                         if message.isStreaming { StreamingCaret().offset(x: 10) }
                     }
             }
+            if !message.isStreaming {
+                let media = MediaRef.extract(from: message.text)
+                if !media.isEmpty { MediaGallery(refs: media) }
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contextMenu {
