@@ -13,6 +13,8 @@ final class ChatStore {
     var messages: [ChatMessage] = []
     var draft = ""
     var attachments: [Attachment] = []
+    /// Whether the composer's field has focus, so a long ⌘V there becomes a pasted-text chip.
+    @ObservationIgnored var composerFocused = false
     var isBusy = false
     var status = ""
     var currentModel = ""
@@ -969,6 +971,13 @@ final class ChatStore {
             guard response == .OK else { return }
             self?.addFiles(panel.urls)
         }
+    }
+
+    /// Puts a pasted-text chip back into the draft as plain text.
+    func expandPaste(_ a: Attachment) {
+        guard let text = a.pastedText else { return }
+        removeAttachment(a)
+        draft = draft.isEmpty ? text : draft + "\n\n" + text
     }
 
     func removeAttachment(_ a: Attachment) {

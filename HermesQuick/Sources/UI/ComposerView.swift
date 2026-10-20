@@ -30,6 +30,12 @@ struct ComposerView: View {
                     HStack(spacing: 8) {
                         ForEach(store.attachments) { a in
                             AttachmentChip(attachment: a) { store.removeAttachment(a) }
+                                .contextMenu {
+                                    if a.pastedText != nil {
+                                        Button("Insert as Text") { store.expandPaste(a) }
+                                    }
+                                    Button("Remove", role: .destructive) { store.removeAttachment(a) }
+                                }
                                 .transition(.scale(scale: 0.6).combined(with: .opacity))
                         }
                     }
@@ -108,6 +114,7 @@ struct ComposerView: View {
         .onChange(of: store.draft) { _, text in store.updateSlash(for: text) }
         .onChange(of: presentation.focusToken) { focused = true }
         .onAppear { focused = true }
+        .onChange(of: focused, initial: true) { _, f in store.composerFocused = f }
         .background(shortcuts)
     }
 
@@ -281,20 +288,11 @@ struct AttachmentChip: View {
 
     var body: some View {
         HStack(spacing: 7) {
-            if let thumb = attachment.thumbnail {
-                Image(nsImage: thumb)
-                    .resizable().aspectRatio(contentMode: .fill)
-                    .frame(width: 26, height: 26)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
+            if let text = attachment.pastedText {
+                pastedLabel(text)
             } else {
-                Image(nsImage: attachment.url.map { NSWorkspace.shared.icon(forFile: $0.path) }
-                      ?? NSWorkspace.shared.icon(for: UTType(filenameExtension: attachment.ext) ?? .data))
-                    .resizable().frame(width: 22, height: 22)
+                fileLabel
             }
-            Text(attachment.name)
-                .font(.app(12, weight: .medium))
-                .lineLimit(1)
-                .frame(maxWidth: 160)
             Button(action: remove) {
                 Image(systemName: "xmark.circle.fill").font(.app(12))
             }
@@ -305,6 +303,45 @@ struct AttachmentChip: View {
         .padding(.leading, 5).padding(.trailing, 8).padding(.vertical, 4)
         .glassEffect(.regular, in: Capsule())
         .onHover { hovering = $0 }
+    }
+
+    /// A long paste: what it starts with and how long it is, like a document rather than a file name.
+    private func pastedLabel(_ text: String) -> some View {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).count
+        let first = text.split(whereSeparator: \.isNewline).first.map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
+        return HStack(spacing: 7) {
+            Image(systemName: "doc.plaintext")
+                .font(.app(14))
+                .foregroundStyle(.secondary)
+                .frame(width: 22, height: 22)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(first.isEmpty ? "Pasted text" : first)
+                    .font(.app(12, weight: .medium))
+                    .lineLimit(1)
+                Text("Pasted · \(lines) line\(lines == 1 ? "" : "s")")
+                    .font(.app(10.5))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: 180, alignment: .leading)
+        }
+        .help(String(text.prefix(600)))
+    }
+
+    @ViewBuilder private var fileLabel: some View {
+        if let thumb = attachment.thumbnail {
+            Image(nsImage: thumb)
+                .resizable().aspectRatio(contentMode: .fill)
+                .frame(width: 26, height: 26)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+        } else {
+            Image(nsImage: attachment.url.map { NSWorkspace.shared.icon(forFile: $0.path) }
+                  ?? NSWorkspace.shared.icon(for: UTType(filenameExtension: attachment.ext) ?? .data))
+                .resizable().frame(width: 22, height: 22)
+        }
+        Text(attachment.name)
+            .font(.app(12, weight: .medium))
+            .lineLimit(1)
+            .frame(maxWidth: 160)
     }
 }
 

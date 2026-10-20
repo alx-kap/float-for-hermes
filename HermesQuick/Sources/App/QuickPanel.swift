@@ -215,6 +215,11 @@ final class PanelController {
             let hasFiles = pb.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true])
             let text = pb.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let hasImage = pb.availableType(from: [.png, .tiff, NSPasteboard.PasteboardType("public.jpeg"), NSPasteboard.PasteboardType("public.heic")]) != nil
+            // A long block of text pasted into the composer becomes a chip, as in Claude and ChatGPT.
+            if !hasFiles, !hasImage, store.composerFocused, store.activeQuestion == nil, Attachment.isLongPaste(text) {
+                store.addAttachments([Attachment.pasted(pb.string(forType: .string) ?? text)])
+                return nil
+            }
             guard hasFiles || (hasImage && (text.isEmpty || text.hasPrefix("http"))) else { return event }
             let items = Attachment.fromPasteboard(pb)
             guard !items.isEmpty else { return event }

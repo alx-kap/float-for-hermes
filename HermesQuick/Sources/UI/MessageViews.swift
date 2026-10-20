@@ -190,7 +190,8 @@ struct MessageRow: View {
             if !message.attachments.isEmpty {
                 HStack(spacing: 4) {
                     ForEach(message.attachments, id: \.self) { name in
-                        Label(name, systemImage: "paperclip")
+                        let pasted = Attachment.isPastedName(name)
+                        Label(pasted ? "Pasted text" : name, systemImage: pasted ? "doc.plaintext" : "paperclip")
                             .font(.app(11))
                             .lineLimit(1)
                             .padding(.horizontal, 8).padding(.vertical, 3)
@@ -219,6 +220,7 @@ struct MessageRow: View {
         VStack(alignment: .leading, spacing: 8) {
             if !message.tools.isEmpty {
                 ToolStrip(tools: message.tools)
+                    .padding(.bottom, 6)  // a clear break between the steps and the reply they led to
             }
             if message.text.isEmpty && message.isStreaming {
                 ShimmerText(text: message.tools.isEmpty ? "Thinking…" : "Working…")

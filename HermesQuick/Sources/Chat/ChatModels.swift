@@ -36,6 +36,8 @@ struct Attachment: Identifiable, Equatable {
     let data: Data
     let isImage: Bool
     var thumbnail: NSImage?
+    /// Set when this is a long paste turned into a text file (see `pasted`).
+    var pastedText: String?
 
     var ext: String { (name as NSString).pathExtension.lowercased() }
 
@@ -92,6 +94,17 @@ struct Attachment: Identifiable, Equatable {
         }
         return []
     }
+
+    /// Pastes this long go up as a text file, shown as a chip, rather than filling the composer.
+    static func isLongPaste(_ text: String) -> Bool {
+        text.count >= 1500 || text.reduce(into: 0) { n, c in if c.isNewline { n += 1 } } >= 15
+    }
+
+    static func pasted(_ text: String) -> Attachment {
+        Attachment(url: nil, name: "Pasted Text \(stamp()).txt", data: Data(text.utf8), isImage: false, pastedText: text)
+    }
+
+    static func isPastedName(_ name: String) -> Bool { name.hasPrefix("Pasted Text ") && name.hasSuffix(".txt") }
 
     static func stamp() -> String {
         let f = DateFormatter()
