@@ -88,6 +88,7 @@ final class ChatStore {
     }
 
     var activeBot: BotProfile? { bots.first { $0.name == prefs.profile } }
+    var botName: String { activeBot?.displayName ?? BotProfile.fallbackName(for: prefs.profile) }
 
     // MARK: Lifecycle
 
@@ -411,11 +412,16 @@ final class ChatStore {
     }
 
     func refreshBots() async {
-        guard let res = try? await gateway.call("profiles.list", [:]) else { return }
+        guard let res = try? await gateway.call("profiles.list", ["include_sessions": false]) else { return }
         bots = (res["profiles"] as? [JSON] ?? []).compactMap { p in
             guard let name = p["name"] as? String else { return nil }
+            // Same name the gateway's Bots roster shows: its Bot Mode title, then the profile's display name.
+            let title = ((p["ui_meta"] as? JSON)?["hermes-bots"] as? JSON)?["title"] as? String
+            let displayName = [title, p["display_name"] as? String]
+                .compactMap { $0?.trimmingCharacters(in: .whitespaces) }
+                .first { !$0.isEmpty }
             return BotProfile(name: name,
-                              displayName: (p["display_name"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? name.capitalized,
+                              displayName: displayName ?? BotProfile.fallbackName(for: name),
                               model: p["model"] as? String ?? "",
                               description: p["description"] as? String ?? "",
                               isDefault: p["is_default"] as? Bool ?? false)
@@ -423,22 +429,45 @@ final class ChatStore {
     }
 
     func refreshModels() async {
-        var params: JSON = ["profile": prefs.profile]
+        // explicit_only: just the providers you set up, not ones the gateway can merely reach
+        // through a stray key on its machine (the Hermes desktop pickers ask for the same).
+        var params: JSON = ["profile": prefs.profile, "explicit_only": true]
         if let sid = sessionId { params["session_id"] = sid }
         guard let res = try? await gateway.call("model.options", params) else { return }
         var out: [ModelChoice] = []
         for p in res["providers"] as? [JSON] ?? [] {
             if (p["authenticated"] as? Bool) == false { continue }
             let slug = p["slug"] as? String ?? ""
-            let name = p["name"] as? String ?? slug
+            let name = Self.shortProviderName(slug: slug, name: p["name"] as? String ?? slug)
             let featured = p["featured_models"] as? [String] ?? []
             let all = p["models"] as? [String] ?? []
-            let list = (featured.isEmpty ? all : featured + all.filter { !featured.contains($0) }).prefix(40)
-            out += list.map { ModelChoice(provider: slug, providerName: name, model: $0) }
+            // Catalogs come newest first, so the top few are the ones worth a click; the rest go one level down.
+            let newest = Set(featured.isEmpty ? Array(all.prefix(Self.newestModelsPerProvider)) : featured)
+            let list = featured + all.filter { !featured.contains($0) }
+            out += list.map { ModelChoice(provider: slug, providerName: name, model: $0, isNewest: newest.contains($0)) }
         }
         models = out
         if let m = res["model"] as? String, !m.isEmpty { currentModel = m }
         if let p = res["provider"] as? String, !p.isEmpty { currentProvider = p }
+    }
+
+    private static let newestModelsPerProvider = 4
+
+    /// Models for the top of a provider's menu section: your favourites there, else its newest few.
+    /// The current model always counts, so its checkmark stays in view.
+    func isPrimary(_ choice: ModelChoice) -> Bool {
+        if choice.model == currentModel && choice.provider == currentProvider { return true }
+        let hasFavorites = prefs.favoriteModels.contains { $0.hasPrefix(choice.provider + "/") }
+        return hasFavorites ? prefs.isFavorite(choice) : choice.isNewest
+    }
+
+    /// The gateway's provider names are written for a setup wizard ("ChatGPT or Codex Subscription").
+    private static func shortProviderName(slug: String, name: String) -> String {
+        switch slug {
+        case "openai-codex": "ChatGPT"
+        case "anthropic": "Anthropic"
+        default: name
+        }
     }
 
     func selectModel(_ choice: ModelChoice) {
@@ -874,7 +903,7 @@ final class ChatStore {
     }
 
     private var chatName: String {
-        currentTitle.isEmpty ? (activeBot?.displayName ?? "Hermes") : currentTitle
+        currentTitle.isEmpty ? botName : currentTitle
     }
 
     private func announceReply(_ reply: String, failed: Bool) {

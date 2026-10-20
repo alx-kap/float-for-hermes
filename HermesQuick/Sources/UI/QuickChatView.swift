@@ -165,8 +165,9 @@ extension AnyTransition {
 struct HeaderBar: View {
     @Environment(ChatStore.self) private var store
     @Environment(\.openSettings) private var openSettings
+    @AppStorage("settingsPane") private var settingsPane: SettingsPane = .general
 
-    private var botName: String { store.activeBot?.displayName ?? Preferences.shared.profile.capitalized }
+    private var botName: String { store.botName }
 
     var body: some View {
         HStack(spacing: 10) {
@@ -247,23 +248,25 @@ struct HeaderBar: View {
             }
             let groups = Dictionary(grouping: store.models, by: \.providerName)
             ForEach(groups.keys.sorted(), id: \.self) { provider in
+                let choices = groups[provider] ?? []
+                let primary = choices.filter(store.isPrimary)
+                let more = choices.filter { !store.isPrimary($0) }
                 Section(provider) {
-                    ForEach(groups[provider] ?? []) { choice in
-                        Button {
-                            store.selectModel(choice)
-                        } label: {
-                            if choice.model == store.currentModel && choice.provider == store.currentProvider {
-                                Label(choice.model, systemImage: "checkmark")
-                            } else {
-                                Text(choice.model)
-                            }
+                    ForEach(primary) { modelButton($0) }
+                    if !more.isEmpty {
+                        Menu("More Models") {
+                            ForEach(more) { modelButton($0) }
                         }
                     }
                 }
             }
             if store.models.isEmpty { Text("Loading models…") }
             Divider()
-            Button("Refresh Models") { Task { await store.refreshModels() } }
+            Button("Choose Models…") {
+                settingsPane = .models
+                NSApp.activate()
+                openSettings()
+            }
             Button("Settings…") {
                 NSApp.activate()
                 openSettings()
@@ -276,6 +279,19 @@ struct HeaderBar: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .help("Switch bot or model")
+    }
+
+    private func isCurrent(_ choice: ModelChoice) -> Bool {
+        choice.model == store.currentModel && choice.provider == store.currentProvider
+    }
+
+    private func modelButton(_ choice: ModelChoice) -> some View {
+        Button {
+            store.selectModel(choice)
+        } label: {
+            if isCurrent(choice) { Label(choice.model, systemImage: "checkmark") }
+            else { Text(choice.model) }
+        }
     }
 
     private var shortModel: String {

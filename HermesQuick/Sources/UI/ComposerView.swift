@@ -125,7 +125,7 @@ struct ComposerView: View {
     }
 
     private var placeholder: String {
-        let bot = store.activeBot?.displayName ?? "Hermes"
+        let bot = store.botName
         if let q = store.activeQuestion { return q.choices.isEmpty ? "Type your answer…" : "Or type your own answer…" }
         if store.editingMessageId != nil { return "Edit your message…" }
         return store.voice.isConversing ? "Voice mode on" : "Ask \(bot)…"

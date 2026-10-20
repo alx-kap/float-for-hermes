@@ -125,6 +125,7 @@ struct SettingsView: View {
         switch selection {
         case .connection: ConnectionPane()
         case .general: GeneralPane()
+        case .models: ModelsPane()
         case .appearance: AppearancePane()
         case .notifications: NotificationsPane(notifier: notifier)
         case .voice: VoicePane()
@@ -135,7 +136,7 @@ struct SettingsView: View {
 // MARK: - Panes
 
 enum SettingsPane: String, CaseIterable, Identifiable {
-    case connection, general, appearance, notifications, voice
+    case connection, general, models, appearance, notifications, voice
 
     var id: String { rawValue }
 
@@ -143,6 +144,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         switch self {
         case .connection: "Hermes"
         case .general: "General"
+        case .models: "Models"
         case .appearance: "Appearance"
         case .notifications: "Notifications"
         case .voice: "Voice"
@@ -153,6 +155,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         switch self {
         case .connection: "Your gateway, sign-in, and which bot you chat with."
         case .general: "How you summon Hermes Quick, and when it starts."
+        case .models: "Pick the models the panel's menu puts first."
         case .appearance: "Text size and how the panel's glass looks over your desktop."
         case .notifications: "Get a heads-up when a reply lands while the panel is hidden."
         case .voice: "Talk to Hermes and hear replies read aloud."
@@ -163,6 +166,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         switch self {
         case .connection: "bolt.horizontal.fill"
         case .general: "gearshape.fill"
+        case .models: "cpu.fill"
         case .appearance: "paintbrush.fill"
         case .notifications: "bell.badge.fill"
         case .voice: "waveform"
@@ -173,6 +177,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         switch self {
         case .connection: .indigo
         case .general: .gray
+        case .models: .purple
         case .appearance: .blue
         case .notifications: .red
         case .voice: .orange
@@ -182,8 +187,9 @@ enum SettingsPane: String, CaseIterable, Identifiable {
     /// Words a search should find this pane by — the labels of the settings it holds.
     var keywords: [String] {
         switch self {
-        case .connection: ["Gateway", "URL", "Status", "Sign In", "Sign Out", "Reconnect", "Account", "Bot", "Profile", "Model"]
+        case .connection: ["Gateway", "URL", "Status", "Sign In", "Sign Out", "Reconnect", "Account", "Bot", "Profile"]
         case .general: ["Shortcut", "Hotkey", "Keyboard", "Launch at login", "Startup"]
+        case .models: ["Model", "Provider", "Favorite", "Favourite", "Menu", "Anthropic", "Claude", "ChatGPT", "OpenAI", "GPT"]
         case .appearance: ["Text size", "Font", "Zoom", "Background", "Opacity", "Blur", "Tint", "Color", "Glass"]
         case .notifications: ["Alerts", "Badge", "Menu bar", "Dot"]
         case .voice: ["Speak", "Speech", "Siri", "Speed", "Rate", "Microphone", "Dictation", "Auto send", "Pause"]
@@ -254,7 +260,7 @@ private struct ConnectionPane: View {
 
             Section {
                 if store.bots.isEmpty {
-                    BotRow(name: prefs.profile.capitalized, model: "", selected: true) {}
+                    BotRow(name: store.botName, model: "", selected: true) {}
                 }
                 ForEach(store.bots) { bot in
                     BotRow(name: bot.displayName, model: bot.model, selected: bot.name == prefs.profile) {
@@ -384,6 +390,46 @@ private struct AppearancePane: View {
                 }
             }
         }
+    }
+}
+
+private struct ModelsPane: View {
+    @Environment(ChatStore.self) private var store
+    @State private var prefs = Preferences.shared
+
+    var body: some View {
+        PaneForm(pane: .models) {
+            let groups = Dictionary(grouping: store.models, by: \.providerName)
+            if store.models.isEmpty {
+                Section {
+                    LabeledContent("Loading models from your gateway…") { ProgressView().controlSize(.small) }
+                }
+            }
+            ForEach(groups.keys.sorted(), id: \.self) { provider in
+                let choices = groups[provider] ?? []
+                let picked = choices.contains(where: prefs.isFavorite)
+                Section {
+                    ForEach(choices) { choice in
+                        Toggle(choice.model, isOn: Binding(get: { prefs.isFavorite(choice) },
+                                                           set: { prefs.setFavorite(choice, $0) }))
+                    }
+                } header: {
+                    Text(provider)
+                } footer: {
+                    Text(picked ? "The rest are under More Models." : "None picked, so the menu shows the newest few.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Section {
+                HStack {
+                    Text("Only providers you've set up on the gateway are listed. Your picks are saved on this Mac.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Refresh") { Task { await store.refreshModels() } }
+                }
+            }
+        }
+        .task { if store.models.isEmpty { await store.refreshModels() } }
     }
 }
 

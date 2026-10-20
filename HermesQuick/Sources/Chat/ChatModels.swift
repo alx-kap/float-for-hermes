@@ -280,6 +280,11 @@ struct BotProfile: Identifiable, Hashable {
     let model: String
     let description: String
     let isDefault: Bool
+
+    /// What to call a profile the gateway hasn't named: the default profile is the Hermes bot itself.
+    static func fallbackName(for profile: String) -> String {
+        profile == "default" ? "Hermes" : profile.capitalized
+    }
 }
 
 /// A stored conversation from `session.list`.
@@ -338,4 +343,6 @@ struct ModelChoice: Identifiable, Hashable {
     let provider: String
     let providerName: String
     let model: String
+    /// One of its provider's newest few, which the menu shows when no favourites are picked.
+    var isNewest = true
 }

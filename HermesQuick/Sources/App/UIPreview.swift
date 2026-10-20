@@ -41,7 +41,7 @@ enum UIPreview {
     private static func fill(_ store: ChatStore) {
         let bot = Preferences.shared.profile
         store.auth.previewSignIn()
-        store.bots = [BotProfile(name: bot, displayName: bot.capitalized, model: "", description: "", isDefault: true)]
+        store.bots = [BotProfile(name: bot, displayName: BotProfile.fallbackName(for: bot), model: "", description: "", isDefault: true)]
         store.models = [ModelChoice(provider: "anthropic", providerName: "Anthropic", model: "claude-sonnet-4.5")]
         store.currentProvider = "anthropic"
         store.currentModel = "claude-sonnet-4.5"

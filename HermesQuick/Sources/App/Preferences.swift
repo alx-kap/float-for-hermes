@@ -26,6 +26,9 @@ final class Preferences {
     /// The panel's card width and message-list height, set by dragging its edges.
     var panelWidth: Double { didSet { save("panelWidth", panelWidth) } }
     var listHeight: Double { didSet { save("listHeight", listHeight) } }
+    /// Models picked to show at the top of the panel's model menu, as "provider/model" ids.
+    /// A provider with none picked shows its newest few instead.
+    var favoriteModels: [String] { didSet { save("favoriteModels", favoriteModels) } }
 
     static let tintPresets: [(name: String, value: String)] = [
         ("Automatic", "auto"), ("Black", "#000000"), ("Graphite", "#1C1C20"), ("Claude Gray", "#262624"), ("Midnight", "#0E1424"),
@@ -61,10 +64,18 @@ final class Preferences {
         backgroundTint = d.string(forKey: "backgroundTint") ?? "auto"
         panelWidth = d.object(forKey: "panelWidth") as? Double ?? Self.defaultPanelWidth
         listHeight = d.object(forKey: "listHeight") as? Double ?? Self.defaultListHeight
+        favoriteModels = d.stringArray(forKey: "favoriteModels") ?? []
     }
 
     private func save(_ key: String, _ value: Any) {
         UserDefaults.standard.set(value, forKey: key)
+    }
+
+    func isFavorite(_ choice: ModelChoice) -> Bool { favoriteModels.contains(choice.id) }
+
+    func setFavorite(_ choice: ModelChoice, _ on: Bool) {
+        favoriteModels.removeAll { $0 == choice.id }
+        if on { favoriteModels.append(choice.id) }
     }
 
     /// ⌘+ / ⌘− step through `textScales`; ⌘0 goes back to 100%.
