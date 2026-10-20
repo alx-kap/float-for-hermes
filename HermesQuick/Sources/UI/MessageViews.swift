@@ -177,11 +177,13 @@ struct MessageRow: View {
         VStack(alignment: .trailing, spacing: 6) {
             if !message.images.isEmpty {
                 HStack(spacing: 6) {
-                    ForEach(Array(message.images.enumerated()), id: \.offset) { _, img in
+                    ForEach(Array(message.images.enumerated()), id: \.offset) { i, img in
                         Image(nsImage: img)
                             .resizable().aspectRatio(contentMode: .fill)
                             .frame(width: message.images.count == 1 ? 180 : 84, height: message.images.count == 1 ? 120 : 84)
                             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .onTapGesture(count: 2) { ImagePreview.shared.show(message.images, at: i) }
                     }
                 }
             }

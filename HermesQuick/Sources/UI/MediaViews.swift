@@ -1,4 +1,43 @@
+import Quartz
 import SwiftUI
+
+/// Sent images open in Quick Look, like double-clicking a photo in Messages: pinch or ⌥-scroll to
+/// zoom, the arrows step through the message's other images, and Markup and Share are in its toolbar.
+final class ImagePreview: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDelegate {
+    static let shared = ImagePreview()
+    private var urls: [URL] = []
+    private let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Image Previews", isDirectory: true)
+
+    var hasItems: Bool { !urls.isEmpty }
+
+    func show(_ images: [NSImage], at index: Int) {
+        try? FileManager.default.removeItem(at: folder)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        urls = images.enumerated().compactMap { i, image in
+            guard let tiff = image.tiffRepresentation,
+                  let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) else { return nil }
+            let url = folder.appendingPathComponent(images.count == 1 ? "Image.png" : "Image \(i + 1).png")
+            return (try? png.write(to: url)) != nil ? url : nil
+        }
+        guard !urls.isEmpty, let panel = QLPreviewPanel.shared() else { return }
+        if panel.isVisible { panel.reloadData() } else { panel.makeKeyAndOrderFront(nil) }
+        panel.currentPreviewItemIndex = min(index, urls.count - 1)
+    }
+
+    func begin(_ panel: QLPreviewPanel) {
+        panel.dataSource = self
+        panel.delegate = self
+        panel.level = NSWindow.Level(NSWindow.Level.floating.rawValue + 1)  // above the Hermes Quick panel
+    }
+
+    func end(_ panel: QLPreviewPanel) {
+        panel.dataSource = nil
+        panel.delegate = nil
+    }
+
+    func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int { urls.count }
+    func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> QLPreviewItem! { urls[index] as NSURL }
+}
 
 /// Images and files the agent referenced, shown under its reply.
 struct MediaGallery: View {

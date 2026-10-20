@@ -1,4 +1,5 @@
 import AppKit
+import Quartz
 import SwiftUI
 
 /// Observable bit the SwiftUI tree uses to run its own entrance/exit animation.
@@ -49,6 +50,105 @@ final class QuickPanel: NSPanel {
     override var canBecomeMain: Bool { true }
 
     override func cancelOperation(_ sender: Any?) { onCancel?() }
+
+    override func makeFirstResponder(_ responder: NSResponder?) -> Bool {
+        let ok = super.makeFirstResponder(responder)
+        if let editor = firstResponder as? NSTextView, editor.isFieldEditor { FieldEditorDrops.adopt(editor) }
+        return ok
+    }
+
+    // Quick Look (double-clicking a sent image) asks the key window's responder chain who drives it.
+    override func acceptsPreviewPanelControl(_ panel: QLPreviewPanel!) -> Bool { ImagePreview.shared.hasItems }
+    override func beginPreviewPanelControl(_ panel: QLPreviewPanel!) { ImagePreview.shared.begin(panel) }
+    override func endPreviewPanelControl(_ panel: QLPreviewPanel!) { ImagePreview.shared.end(panel) }
+}
+
+/// SwiftUI text fields edit through a private field editor that takes a dropped file (or the
+/// screenshot thumbnail) and types its path. Files and images go on to the card's drop target
+/// instead, so they become attachments wherever they land; dragged text still drops into the field.
+/// The editor can't be replaced (SwiftUI casts it to its own class), so it gets a runtime subclass,
+/// the way KVO does it, whose drag methods forward attachment drags and leave the rest alone.
+enum FieldEditorDrops {
+    private static let prefix = "HermesQuickDrops_"
+    private static let imageTypes: [NSPasteboard.PasteboardType] =
+        [.png, .tiff, NSPasteboard.PasteboardType("public.jpeg"), NSPasteboard.PasteboardType("public.heic")]
+
+    static func adopt(_ editor: NSTextView) {
+        guard let base = object_getClass(editor) else { return }
+        let baseName = NSStringFromClass(base)
+        // Already adopted, or KVO has its own subclass in place: leave it be.
+        guard !baseName.hasPrefix(prefix), !baseName.hasPrefix("NSKVONotifying_") else { return }
+        let name = prefix + baseName
+        if let existing = NSClassFromString(name) {
+            object_setClass(editor, existing)
+            return
+        }
+        guard let sub = objc_allocateClassPair(base, name, 0) else { return }
+        forward(#selector(NSTextView.draggingEntered(_:)), in: sub, base: base) { ($0 as NSDraggingDestination).draggingEntered?($1).rawValue ?? 0 }
+        forward(#selector(NSTextView.draggingUpdated(_:)), in: sub, base: base) { ($0 as NSDraggingDestination).draggingUpdated?($1).rawValue ?? 0 }
+        forward(#selector(NSTextView.prepareForDragOperation(_:)), in: sub, base: base) { ($0 as NSDraggingDestination).prepareForDragOperation?($1) ?? true }
+        forward(#selector(NSTextView.performDragOperation(_:)), in: sub, base: base) { ($0 as NSDraggingDestination).performDragOperation?($1) ?? false }
+        forwardVoid(#selector(NSTextView.draggingExited(_:)), in: sub, base: base) { ($0 as NSDraggingDestination).draggingExited?($1) }
+        forwardVoid(#selector(NSTextView.concludeDragOperation(_:)), in: sub, base: base) { ($0 as NSDraggingDestination).concludeDragOperation?($1) }
+        objc_registerClassPair(sub)
+        object_setClass(editor, sub)
+    }
+
+    /// The card's drop target (SwiftUI's `onDrop` view), when this drag carries files or images.
+    private static func card(for editor: NSView, _ info: NSDraggingInfo) -> NSView? {
+        let pb = info.draggingPasteboard
+        let isAttachment = pb.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true])
+            || pb.availableType(from: imageTypes) != nil
+            || pb.canReadObject(forClasses: [NSFilePromiseReceiver.self], options: nil)
+        guard isAttachment, let root = editor.window?.contentView else { return nil }
+        let any = NSPasteboard.PasteboardType("public.item")
+        func find(_ v: NSView) -> NSView? {
+            if !(v is NSTextView), v.registeredDraggedTypes.contains(any) { return v }
+            return v.subviews.lazy.compactMap(find).first
+        }
+        return find(root)
+    }
+
+    private static func forward(_ sel: Selector, in sub: AnyClass, base: AnyClass,
+                                _ call: @escaping (NSView, NSDraggingInfo) -> UInt) {
+        typealias Original = @convention(c) (AnyObject, Selector, NSDraggingInfo) -> UInt
+        guard let imp = class_getMethodImplementation(base, sel) else { return }
+        let original = unsafeBitCast(imp, to: Original.self)
+        let block: @convention(block) (NSTextView, NSDraggingInfo) -> UInt = { editor, info in
+            guard let card = card(for: editor, info) else { return original(editor, sel, info) }
+            return call(card, info)
+        }
+        add(sel, block, to: sub, base: base)
+    }
+
+    private static func forward(_ sel: Selector, in sub: AnyClass, base: AnyClass,
+                                _ call: @escaping (NSView, NSDraggingInfo) -> Bool) {
+        typealias Original = @convention(c) (AnyObject, Selector, NSDraggingInfo) -> Bool
+        guard let imp = class_getMethodImplementation(base, sel) else { return }
+        let original = unsafeBitCast(imp, to: Original.self)
+        let block: @convention(block) (NSTextView, NSDraggingInfo) -> Bool = { editor, info in
+            guard let card = card(for: editor, info) else { return original(editor, sel, info) }
+            return call(card, info)
+        }
+        add(sel, block, to: sub, base: base)
+    }
+
+    private static func forwardVoid(_ sel: Selector, in sub: AnyClass, base: AnyClass,
+                                    _ call: @escaping (NSView, NSDraggingInfo) -> Void) {
+        typealias Original = @convention(c) (AnyObject, Selector, NSDraggingInfo?) -> Void
+        guard let imp = class_getMethodImplementation(base, sel) else { return }
+        let original = unsafeBitCast(imp, to: Original.self)
+        let block: @convention(block) (NSTextView, NSDraggingInfo?) -> Void = { editor, info in
+            guard let info, let card = card(for: editor, info) else { return original(editor, sel, info) }
+            call(card, info)
+        }
+        add(sel, block, to: sub, base: base)
+    }
+
+    private static func add(_ sel: Selector, _ block: Any, to sub: AnyClass, base: AnyClass) {
+        guard let types = class_getInstanceMethod(base, sel).flatMap(method_getTypeEncoding) else { return }
+        class_addMethod(sub, sel, imp_implementationWithBlock(block), types)
+    }
 }
 
 final class PanelController {
