@@ -1,0 +1,4 @@
+.DS_Store
+HermesQuick/build/
+HermesQuick/*.xcodeproj/
+xcuserdata/
