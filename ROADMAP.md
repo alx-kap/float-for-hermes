@@ -14,7 +14,7 @@ The bar for every item: it should feel native, polished and intuitive (system id
 ## Medium impact
 
 - [ ] **6. Send content in from other apps.** A hotkey that sends the selected text, a Services menu entry ("Ask Hermes"), App Intents for Shortcuts and Spotlight, a `hermesquick://` URL scheme, or "attach a screenshot of the current window".
-- [ ] **7. Fuller Markdown.** `MarkdownView` only splits text from code blocks. It has no tables, blockquotes or syntax highlighting.
+- [x] **7. Fuller Markdown.** Built 2026-10-20. `MarkdownView` now pulls GFM tables (column alignment, header shading, row stripes, cells wrap at ~280pt, wide tables scroll sideways) and multi-line block quotes out of text blocks; quotes render their contents as Markdown, and `> [!NOTE]`/`TIP`/`IMPORTANT`/`WARNING`/`CAUTION` become GitHub-style callouts. `UI/SyntaxHighlighter.swift` colours code blocks with a single regex pass (comments, strings, numbers, keywords, types, attributes, JSON/YAML keys, shell variables, tags) in Xcode's light/dark colours for about 15 languages; untagged blocks stay plain and results are cached so streaming stays cheap. Checked in the app by hand.
 - [ ] **8. Queue messages typed while offline.** A send during a reconnect errors. Queue it and send it once the connection is back.
 - [ ] **9. Usage display.** Show tokens, cost and context-window fill (`session.usage`, `session.context_breakdown`).
 
