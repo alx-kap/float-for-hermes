@@ -58,6 +58,24 @@ final class PanelController {
         // ⌘V with a copied file or image attaches it instead of pasting text.
         pasteMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self, weak store] event in
             guard let self, let store, event.window === self.panel else { return event }
+            let mods = event.modifierFlags.intersection([.command, .option, .control, .shift])
+            if mods == .command, event.charactersIgnoringModifiers == "k" {
+                store.toggleHistory()
+                return nil
+            }
+            // Past-chats list: arrows and return drive the list while the search field keeps typing.
+            if store.showingHistory {
+                if mods == .command, event.charactersIgnoringModifiers == "n" { store.newChat(); return nil }
+                if mods.isEmpty {
+                    switch event.keyCode {
+                    case 125: store.moveHistory(1); return nil      // ↓
+                    case 126: store.moveHistory(-1); return nil     // ↑
+                    case 36, 76: store.openSelectedHistory(); return nil
+                    case 53: store.closeHistory(); return nil       // esc goes back to the chat
+                    default: break
+                    }
+                }
+            }
             // Slash menu keys win over the text field.
             if store.showSlash, event.modifierFlags.intersection([.command, .option, .control]).isEmpty {
                 switch event.keyCode {

@@ -132,6 +132,57 @@ struct BotProfile: Identifiable, Hashable {
     let isDefault: Bool
 }
 
+/// A stored conversation from `session.list`.
+struct SessionSummary: Identifiable, Equatable {
+    let id: String          // stored session id (what `session.resume` takes)
+    var title: String
+    let preview: String
+    let startedAt: Date
+    let messageCount: Int
+    let source: String
+
+    init?(_ row: JSON) {
+        guard let id = row["id"] as? String, !id.isEmpty else { return nil }
+        self.id = id
+        title = (row["title"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        // Previews are the first prompt as stored, so drop `@file:` refs and attached context.
+        preview = ChatStore.userDisplay(row["preview"] as? String ?? "").0
+        startedAt = Date(timeIntervalSince1970: (row["started_at"] as? NSNumber)?.doubleValue ?? 0)
+        messageCount = (row["message_count"] as? NSNumber)?.intValue ?? 0
+        source = (row["source"] as? String ?? "").lowercased()
+    }
+
+    var displayTitle: String {
+        if !title.isEmpty { return title }
+        let line = preview.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
+        return line.isEmpty ? "New Chat" : line
+    }
+
+    /// Scheduled and automated runs: real sessions, but not conversations someone had.
+    var isAutomated: Bool {
+        ["cron", "schedule", "scheduler", "scheduled", "webhook", "automation", "heartbeat"].contains(source)
+    }
+
+    /// Where the chat started, when it wasn't one of the Hermes apps (e.g. "Telegram").
+    var sourceLabel: String? {
+        ["", "desktop", "tui", "cli", "unknown", "api"].contains(source) ? nil : source.capitalized
+    }
+
+    /// "9:41", "Yesterday", "Tuesday", "12 Oct", "12 Oct 2025", like Mail and Messages.
+    var dateLabel: String {
+        let cal = Calendar.current
+        if cal.isDateInToday(startedAt) { return startedAt.formatted(date: .omitted, time: .shortened) }
+        if cal.isDateInYesterday(startedAt) { return "Yesterday" }
+        if let days = cal.dateComponents([.day], from: startedAt, to: .now).day, days < 7 {
+            return startedAt.formatted(.dateTime.weekday(.wide))
+        }
+        if cal.isDate(startedAt, equalTo: .now, toGranularity: .year) {
+            return startedAt.formatted(.dateTime.day().month(.abbreviated))
+        }
+        return startedAt.formatted(.dateTime.day().month(.abbreviated).year())
+    }
+}
+
 struct ModelChoice: Identifiable, Hashable {
     var id: String { provider + "/" + model }
     let provider: String

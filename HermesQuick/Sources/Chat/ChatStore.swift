@@ -25,11 +25,24 @@ final class ChatStore {
     @ObservationIgnored var slashTask: Task<Void, Never>?
     var lastError: String?
 
+    // Past conversations
+    var sessions: [SessionSummary] = []
+    var isLoadingSessions = false
+    var isOpeningSession = false
+    var showingHistory = false
+    var historyQuery = ""
+    var historySelection = 0
+    /// Bumped when the keyboard moves the selection, so only arrow keys scroll the list (not hovering).
+    var historyScrollRequest = 0
+    var currentTitle = ""
+
     private(set) var sessionId: String?
     private var streamingIndex: Int?
     private var sessionTask: Task<String, Error>?
 
     private var storedSessionKey: String { "storedSession:\(prefs.gatewayURL):\(prefs.profile)" }
+    /// Stored id of the open chat (nil for a brand-new chat that hasn't been saved yet).
+    var currentStoredId: String? { UserDefaults.standard.string(forKey: storedSessionKey) }
 
     init() {
         auth = AuthManager()
@@ -56,6 +69,7 @@ final class ChatStore {
                 _ = try await ensureSession()
                 await refreshBots()
                 await refreshModels()
+                await refreshSessions()
             } catch { report(error) }
         }
     }
@@ -89,6 +103,8 @@ final class ChatStore {
             attachments.removeAll()
             pendingApproval = nil
             status = ""
+            currentTitle = ""
+            showingHistory = false
         }
         warmUp()
     }
@@ -97,7 +113,13 @@ final class ChatStore {
         guard bot.name != prefs.profile else { return }
         prefs.profile = bot.name
         sessionId = nil
-        withAnimation(.smooth(duration: 0.35)) { messages.removeAll() }
+        streamingIndex = nil
+        sessions = []
+        historySelection = 0
+        withAnimation(.smooth(duration: 0.35)) {
+            messages.removeAll()
+            currentTitle = ""
+        }
         warmUp()
     }
 
@@ -105,50 +127,236 @@ final class ChatStore {
     func ensureSession() async throws -> String {
         if let sid = sessionId { return sid }
         if let t = sessionTask { return try await t.value }
-        let t = Task<String, Error> {
-            try await gateway.ensureConnected()
-            let profile = prefs.profile
-            if let stored = UserDefaults.standard.string(forKey: storedSessionKey) {
-                if let res = try? await gateway.call("session.resume", [
-                    "session_id": stored, "profile": profile, "inline_images": false,
-                ]), let sid = res["session_id"] as? String {
-                    adopt(res, sid: sid, stored: res["stored_session_id"] as? String ?? stored)
-                    return sid
-                }
-            }
-            let res = try await gateway.call("session.create", ["profile": profile, "source": "desktop"])
+        return try await bindSession {
+            if let stored = self.currentStoredId, let sid = try? await self.resume(stored) { return sid }
+            let res = try await self.gateway.call("session.create", ["profile": self.prefs.profile, "source": "desktop"])
             guard let sid = res["session_id"] as? String else { throw RPCError(code: 0, message: "No session id") }
-            adopt(res, sid: sid, stored: res["stored_session_id"] as? String)
+            self.adopt(res, sid: sid, stored: res["stored_session_id"] as? String)
             return sid
         }
+    }
+
+    private func bindSession(_ work: @escaping () async throws -> String) async throws -> String {
+        let t = Task<String, Error> {
+            try await gateway.ensureConnected()
+            return try await work()
+        }
         sessionTask = t
-        defer { sessionTask = nil }
+        defer { if sessionTask == t { sessionTask = nil } }
         return try await t.value
+    }
+
+    private func resume(_ stored: String) async throws -> String {
+        let res = try await gateway.call("session.resume", [
+            "session_id": stored, "profile": prefs.profile, "inline_images": false,
+        ])
+        guard let sid = res["session_id"] as? String else { throw RPCError(code: 0, message: "Couldn't open that chat") }
+        adopt(res, sid: sid, stored: res["stored_session_id"] as? String ?? stored)
+        return sid
     }
 
     private func adopt(_ res: JSON, sid: String, stored: String?) {
         sessionId = sid
         if let stored, !stored.isEmpty { UserDefaults.standard.set(stored, forKey: storedSessionKey) }
         if let info = res["info"] as? JSON { applyInfo(info) }
-        let history = (res["messages"] as? [JSON] ?? []).compactMap(Self.transcriptMessage)
+        let history = Self.transcript(res["messages"] as? [JSON] ?? [])
         if messages.isEmpty || !history.isEmpty {
-            messages = Array(history.suffix(60))
+            withAnimation(.smooth(duration: 0.3)) { messages = Array(history.suffix(200)) }
         }
         if res["running"] as? Bool == true { isBusy = true }
+        if let stored, let row = sessions.first(where: { $0.id == stored }), !row.title.isEmpty { currentTitle = row.title }
+        Task {
+            if let r = try? await gateway.call("session.title", ["session_id": sid]),
+               let t = r["title"] as? String, !t.isEmpty, sessionId == sid { currentTitle = t }
+        }
     }
 
-    private static func transcriptMessage(_ m: JSON) -> ChatMessage? {
-        let role = m["role"] as? String ?? ""
+    /// Rebuilds bubbles from a stored transcript. One assistant bubble per turn, like the live stream:
+    /// tool rows become its tool strip and the turn's last reply is its text.
+    static func transcript(_ rows: [JSON]) -> [ChatMessage] {
+        var out: [ChatMessage] = []
+        var turn: ChatMessage?
+        func flush() {
+            if let t = turn, !t.text.isEmpty || !t.tools.isEmpty { out.append(t) }
+            turn = nil
+        }
+        for m in rows {
+            let date = (m["timestamp"] as? NSNumber).map { Date(timeIntervalSince1970: $0.doubleValue) }
+            let text = messageText(m)
+            switch m["role"] as? String ?? "" {
+            case "user":
+                flush()
+                let (clean, files) = userDisplay(text)
+                guard !clean.isEmpty || !files.isEmpty else { continue }
+                var msg = ChatMessage(role: .user, text: clean, attachments: files)
+                if let date { msg.date = date }
+                out.append(msg)
+            case "assistant":
+                if turn == nil {
+                    turn = ChatMessage(role: .assistant, text: "")
+                    if let date { turn?.date = date }
+                }
+                if !text.isEmpty { turn?.text = text }
+                if let r = m["reasoning"] as? String, !r.isEmpty { turn?.reasoning += r }
+            case "tool":
+                if turn == nil { turn = ChatMessage(role: .assistant, text: "") }
+                turn?.tools.append(ToolActivity(id: m["tool_call_id"] as? String ?? UUID().uuidString,
+                                                name: m["name"] as? String ?? "tool",
+                                                preview: m["context"] as? String ?? "", done: true))
+            default:
+                continue
+            }
+        }
+        flush()
+        return out
+    }
+
+    /// What the user actually typed, plus the names of what they attached. Stored prompts carry the
+    /// gateway's expansion (`@file:` refs, an "Attached Context" block, `@image:` paths); show them as chips.
+    static func userDisplay(_ text: String) -> (String, [String]) {
+        var body = text
+        var tail = ""
+        if let r = body.range(of: "--- Attached Context ---") {
+            tail = String(body[r.upperBound...])
+            body = String(body[..<r.lowerBound])
+        }
+        var files: [String] = []
+        /// Attachment name and whatever text follows the ref on the same line.
+        func ref(_ line: Substring) -> (name: String, rest: String)? {
+            let t = line.trimmingCharacters(in: .whitespaces)
+            for prefix in ["@file:", "@image:"] where t.hasPrefix(prefix) {
+                let after = t.dropFirst(prefix.count)
+                let path = after.prefix { !$0.isWhitespace }
+                return ((String(path) as NSString).lastPathComponent,
+                        after.dropFirst(path.count).trimmingCharacters(in: .whitespaces))
+            }
+            return nil
+        }
+        var kept: [String] = []
+        for line in body.split(separator: "\n", omittingEmptySubsequences: false) {
+            if let r = ref(line) {
+                if !files.contains(r.name) { files.append(r.name) }
+                if !r.rest.isEmpty { kept.append(r.rest) }
+            } else { kept.append(String(line)) }
+        }
+        for line in tail.split(separator: "\n") {
+            if let r = ref(line), !files.contains(r.name) { files.append(r.name) }
+        }
+        let clean = kept.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        return (clean, files)
+    }
+
+    private static func messageText(_ m: JSON) -> String {
         var text = m["text"] as? String ?? ""
         if text.isEmpty, let c = m["content"] as? String { text = c }
         if text.isEmpty, let parts = m["content"] as? [JSON] {
             text = parts.compactMap { $0["text"] as? String }.joined(separator: "\n")
         }
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-        switch role {
-        case "user": return ChatMessage(role: .user, text: text)
-        case "assistant": return ChatMessage(role: .assistant, text: text)
-        default: return nil
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    // MARK: Past conversations
+
+    func refreshSessions() async {
+        guard auth.isSignedIn else { return }
+        let profile = prefs.profile
+        isLoadingSessions = true
+        defer { isLoadingSessions = false }
+        guard let res = try? await gateway.call("session.list", ["profile": profile, "limit": 100]),
+              profile == prefs.profile else { return }
+        let rows = (res["sessions"] as? [JSON] ?? []).compactMap(SessionSummary.init)
+        withAnimation(.snappy) { sessions = rows.filter { ($0.messageCount > 0 && !$0.isAutomated) || $0.id == currentStoredId } }
+        if let row = sessions.first(where: { $0.id == currentStoredId }), !row.title.isEmpty { currentTitle = row.title }
+    }
+
+    /// Switch the panel to a stored chat. A turn still running in the old chat keeps going on the gateway.
+    func openSession(_ s: SessionSummary) {
+        closeHistory()
+        guard s.id != currentStoredId || sessionId == nil else { return }
+        let previous = currentStoredId
+        voice.stopSpeaking()
+        if let sid = sessionId, !isBusy { Task { try? await gateway.call("session.close", ["session_id": sid]) } }
+        UserDefaults.standard.set(s.id, forKey: storedSessionKey)
+        sessionId = nil
+        streamingIndex = nil
+        withAnimation(.smooth(duration: 0.3)) {
+            messages.removeAll()
+            pendingApproval = nil
+            status = ""
+            isBusy = false
+            currentTitle = s.title
+            isOpeningSession = true
+        }
+        Task {
+            do {
+                _ = try await bindSession { try await self.resume(s.id) }
+                await refreshModels()
+            } catch {
+                report(error)
+                if let previous { UserDefaults.standard.set(previous, forKey: storedSessionKey) }
+                else { UserDefaults.standard.removeObject(forKey: storedSessionKey) }
+                currentTitle = ""
+                warmUp()
+            }
+            withAnimation(.smooth(duration: 0.3)) { isOpeningSession = false }
+        }
+    }
+
+    func renameCurrentChat(_ title: String) {
+        let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty, t != currentTitle else { return }
+        let old = currentTitle
+        currentTitle = t
+        Task {
+            do {
+                let sid = try await ensureSession()
+                let r = try await gateway.call("session.title", ["session_id": sid, "title": t])
+                if let v = r["title"] as? String, !v.isEmpty { currentTitle = v }
+                await refreshSessions()
+            } catch {
+                currentTitle = old
+                report(error)
+            }
+        }
+    }
+
+    /// Archive hides the chat from lists but keeps its messages on the gateway.
+    func archiveSession(_ s: SessionSummary) {
+        removeFromList(s)
+        Task {
+            do {
+                try await gateway.call("session.archive", ["session_id": s.id, "archived": true, "profile": prefs.profile])
+                if s.id == currentStoredId { newChat() }
+            } catch {
+                report(error)
+                await refreshSessions()
+            }
+        }
+    }
+
+    func deleteSession(_ s: SessionSummary) {
+        removeFromList(s)
+        let isCurrent = s.id == currentStoredId
+        let live = isCurrent ? sessionId : nil
+        Task {
+            do {
+                // The gateway refuses to delete a chat that is open, so let go of it first.
+                if isCurrent {
+                    newChat()
+                    if let live { try? await gateway.call("session.close", ["session_id": live]) }
+                }
+                try await gateway.call("session.delete", ["session_id": s.id, "profile": prefs.profile])
+            } catch {
+                report(error)
+                await refreshSessions()
+            }
+        }
+    }
+
+    private func removeFromList(_ s: SessionSummary) {
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+            sessions.removeAll { $0.id == s.id }
+            historySelection = min(historySelection, max(historyResults.count - 1, 0))
         }
     }
 
@@ -365,6 +573,11 @@ final class ChatStore {
             withAnimation(.easeInOut(duration: 0.2)) { status = text }
         case "session.info":
             applyInfo(p)
+        case "session.title":
+            if let t = p["title"] as? String, !t.isEmpty {
+                withAnimation(.snappy) { currentTitle = t }
+                if let key = p["session_id"] as? String, let i = sessions.firstIndex(where: { $0.id == key }) { sessions[i].title = t }
+            }
         case "error":
             report(RPCError(code: 0, message: p["message"] as? String ?? "Error"))
             if streamingIndex == nil { isBusy = false }
@@ -400,6 +613,7 @@ final class ChatStore {
         }
         let reply = messages[i].text
         streamingIndex = nil
+        Task { await refreshSessions() }
         if voice.isConversing || (prefs.speakReplies && voice.lastTurnWasVoice) {
             voice.speak(reply)
         } else {

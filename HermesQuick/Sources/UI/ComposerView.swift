@@ -27,6 +27,12 @@ struct ComposerView: View {
             HStack(alignment: .bottom, spacing: 8) {
                 IconButton(symbol: "plus", help: "Attach files (⌘O)") { store.chooseFiles(over: NSApp.keyWindow) }
                     .padding(.bottom, 2)
+                if store.messages.isEmpty && !store.voice.isConversing && !store.isOpeningSession && !store.showingHistory {
+                    // The header (with its own history button) only appears once a chat has started.
+                    IconButton(symbol: "clock.arrow.circlepath", help: "Past chats (⌘K)") { store.openHistory() }
+                        .padding(.bottom, 2)
+                        .transition(.scale.combined(with: .opacity))
+                }
 
                 ZStack(alignment: .leading) {
                     if voice.isListening && !voice.isConversing {
@@ -70,6 +76,7 @@ struct ComposerView: View {
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: voice.isListening)
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: store.attachments.count)
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: store.showSlash)
+        .animation(.snappy, value: store.messages.isEmpty)
         .onChange(of: store.draft) { _, text in store.updateSlash(for: text) }
         .onChange(of: presentation.focusToken) { focused = true }
         .onAppear { focused = true }

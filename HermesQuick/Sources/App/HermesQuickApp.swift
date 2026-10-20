@@ -10,6 +10,7 @@ struct HermesQuickApp: App {
             MenuBarContent()
                 .environment(delegate.store)
                 .environment(\.panelToggle, { delegate.panel.toggle() })
+                .environment(\.panelShow, { delegate.panel.show() })
         } label: {
             Image(systemName: "bolt.horizontal.circle.fill")
         }
@@ -54,21 +55,40 @@ private struct PanelToggleKey: EnvironmentKey {
     static let defaultValue: () -> Void = {}
 }
 
+private struct PanelShowKey: EnvironmentKey {
+    static let defaultValue: () -> Void = {}
+}
+
 extension EnvironmentValues {
     var panelToggle: () -> Void {
         get { self[PanelToggleKey.self] }
         set { self[PanelToggleKey.self] = newValue }
+    }
+    var panelShow: () -> Void {
+        get { self[PanelShowKey.self] }
+        set { self[PanelShowKey.self] = newValue }
     }
 }
 
 struct MenuBarContent: View {
     @Environment(ChatStore.self) private var store
     @Environment(\.panelToggle) private var toggle
+    @Environment(\.panelShow) private var show
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         Button("Open Hermes Quick  (\(Preferences.shared.hotKey.label))") { toggle() }
-        Button("New Chat") { store.newChat(); toggle() }
+        Button("New Chat") { store.newChat(); show() }
+        if store.auth.isSignedIn {
+            Menu("Open Recent") {
+                ForEach(store.sessions.prefix(8)) { s in
+                    Button(s.displayTitle) { store.openSession(s); show() }
+                }
+                if store.sessions.isEmpty { Text("No Past Chats") }
+                Divider()
+                Button("Show All Chats…") { show(); store.openHistory() }
+            }
+        }
         Divider()
         if store.auth.isSignedIn {
             Text(statusText)

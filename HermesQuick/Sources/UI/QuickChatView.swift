@@ -8,7 +8,9 @@ struct QuickChatView: View {
     @Namespace private var glass
 
     private let cardWidth: CGFloat = 680
-    private var hasConversation: Bool { !store.messages.isEmpty || store.voice.isConversing }
+    private var hasConversation: Bool {
+        !store.messages.isEmpty || store.voice.isConversing || store.showingHistory || store.isOpeningSession
+    }
 
     var body: some View {
         GlassEffectContainer(spacing: 14) {
@@ -29,6 +31,9 @@ struct QuickChatView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .animation(.spring(response: 0.42, dampingFraction: 0.84), value: hasConversation)
         .animation(.snappy, value: store.lastError)
+        .onChange(of: store.showingHistory) { _, showing in
+            if !showing { presentation.focusToken += 1 }
+        }
     }
 
     @ViewBuilder
@@ -41,23 +46,36 @@ struct QuickChatView: View {
                 if hasConversation {
                     HeaderBar()
                         .transition(.move(edge: .top).combined(with: .opacity))
-                    if store.voice.isConversing {
+                    if store.showingHistory {
+                        HistoryView()
+                            .frame(height: 440)
+                            .transition(.handoff)
+                    } else if store.voice.isConversing {
                         VoiceStage()
                             .frame(height: 300)
                             .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    } else if store.isOpeningSession && store.messages.isEmpty {
+                        ProgressView()
+                            .controlSize(.small)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 440)
+                            .transition(.opacity)
                     } else {
                         MessageList()
                             .frame(height: 440)
-                            .transition(.opacity)
+                            .transition(.handoff)
                     }
                 }
-                if let approval = store.pendingApproval {
+                if let approval = store.pendingApproval, !store.showingHistory {
                     ApprovalCard(request: approval)
                         .padding(.horizontal, 14)
                         .padding(.bottom, 8)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
-                ComposerView()
+                if !store.showingHistory {
+                    ComposerView()
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
             }
         }
         .background {
@@ -101,6 +119,17 @@ struct QuickChatView: View {
     }
 }
 
+extension AnyTransition {
+    /// Swap two views that share a spot: the old one fades out first, then the new one fades in,
+    /// so their contents never show through each other.
+    static var handoff: AnyTransition {
+        .asymmetric(
+            insertion: .opacity.combined(with: .scale(scale: 0.985, anchor: .top))
+                .animation(.easeOut(duration: 0.2).delay(0.1)),
+            removal: .opacity.animation(.easeIn(duration: 0.1)))
+    }
+}
+
 // MARK: - Header
 
 struct HeaderBar: View {
@@ -111,11 +140,22 @@ struct HeaderBar: View {
         HStack(spacing: 8) {
             botMenu
             modelMenu
-            Spacer()
+            if store.showingHistory {
+                Text("Chats")
+                    .font(.system(size: 13, weight: .semibold))
+                    .padding(.leading, 4)
+                    .transition(.handoff)
+            } else {
+                ChatTitle()
+                    .transition(.handoff)
+            }
+            Spacer(minLength: 4)
             if store.isBusy {
                 ThinkingDots()
                     .transition(.scale.combined(with: .opacity))
             }
+            IconButton(symbol: "clock.arrow.circlepath", help: "Past chats (⌘K)",
+                       active: store.showingHistory) { store.toggleHistory() }
             IconButton(symbol: "square.and.pencil", help: "New chat (⌘N)") { store.newChat() }
             IconButton(symbol: "gearshape", help: "Settings") {
                 NSApp.activate()
@@ -128,6 +168,7 @@ struct HeaderBar: View {
         .background(WindowDragArea())
         .overlay(alignment: .top) { DragGrabber().padding(.top, 4) }
         .animation(.snappy, value: store.isBusy)
+        .animation(.snappy, value: store.showingHistory)
     }
 
     private var botMenu: some View {
@@ -198,6 +239,54 @@ struct HeaderBar: View {
     }
 }
 
+/// The open chat's title. Double-click (or right-click › Rename) to rename it in place.
+struct ChatTitle: View {
+    @Environment(ChatStore.self) private var store
+    @State private var editing = false
+    @State private var text = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        Group {
+            if editing {
+                TextField("Chat name", text: $text)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12, weight: .medium))
+                    .focused($focused)
+                    .onSubmit(commit)
+                    .onExitCommand { editing = false }
+                    .onChange(of: focused) { _, f in if !f && editing { commit() } }
+                    .padding(.horizontal, 7).padding(.vertical, 3)
+                    .background(.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .frame(maxWidth: 220)
+            } else if !store.currentTitle.isEmpty {
+                Text(store.currentTitle)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .contentTransition(.opacity)
+                    .padding(.leading, 4)
+                    .onTapGesture(count: 2, perform: beginEditing)
+                    .contextMenu { Button("Rename…", action: beginEditing) }
+                    .help("Double-click to rename")
+            }
+        }
+        .animation(.snappy, value: store.currentTitle)
+    }
+
+    private func beginEditing() {
+        text = store.currentTitle
+        editing = true
+        focused = true
+    }
+
+    private func commit() {
+        editing = false
+        store.renameCurrentChat(text)
+    }
+}
+
 struct BotAvatar: View {
     let name: String
     var body: some View {
@@ -221,6 +310,7 @@ struct BotAvatar: View {
 struct IconButton: View {
     let symbol: String
     let help: String
+    var active = false
     let action: () -> Void
     @State private var hovering = false
 
@@ -232,8 +322,8 @@ struct IconButton: View {
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(hovering ? .primary : .secondary)
-        .background(Circle().fill(.primary.opacity(hovering ? 0.08 : 0)))
+        .foregroundStyle(active ? AnyShapeStyle(Color.accentColor) : hovering ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+        .background(Circle().fill(active ? Color.accentColor.opacity(0.15) : Color.primary.opacity(hovering ? 0.08 : 0)))
         .onHover { h in withAnimation(.easeOut(duration: 0.12)) { hovering = h } }
         .help(help)
     }

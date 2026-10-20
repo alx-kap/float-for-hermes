@@ -19,6 +19,7 @@ This builds a Release copy into `~/Applications/Hermes Quick.app` and launches i
 | Slash commands | Type `/` for suggestions: ↑↓ choose, ↩ run, ⇥ insert to add arguments, esc close |
 | Stop the current turn | ⌘. |
 | New chat | ⌘N |
+| Past chats | ⌘K, or the clock button: type to search, ↑↓ choose, ↩ open, esc back. Right-click a chat to archive or delete it; double-click the title in the header to rename. Recent chats are also in the menu bar |
 | Dictate one message | ⌘D |
 | Hands-free voice mode | ⇧⌘D |
 | Attach files or images | ⌘O, drag and drop (Finder, Safari, Photos, screenshots), or ⌘V a copied file or image |
