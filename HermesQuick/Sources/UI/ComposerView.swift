@@ -58,12 +58,19 @@ struct ComposerView: View {
                 conversationButton
                 sendButton
             }
+
+            if store.showSlash {
+                SlashMenu()
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .background(WindowDragArea())
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: voice.isListening)
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: store.attachments.count)
+        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: store.showSlash)
+        .onChange(of: store.draft) { _, text in store.updateSlash(for: text) }
         .onChange(of: presentation.focusToken) { focused = true }
         .onAppear { focused = true }
         .background(shortcuts)
@@ -134,6 +141,79 @@ struct ComposerView: View {
         .allowsHitTesting(false)
     }
 
+}
+
+/// Slash-command suggestions under the input. ↑↓ choose, ↩ run, ⇥ insert, esc close.
+struct SlashMenu: View {
+    @Environment(ChatStore.self) private var store
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 2) {
+                        ForEach(Array(store.slashItems.enumerated()), id: \.element.id) { i, item in
+                            SlashRow(item: item, selected: i == store.slashSelection)
+                                .id(item.id)
+                                .onHover { if $0 { store.slashSelection = i } }
+                                .onTapGesture { store.slashSelection = i; store.runSelectedSlash() }
+                        }
+                    }
+                    .padding(4)
+                }
+                .frame(height: min(CGFloat(store.slashItems.count), 6) * 40 + 8)
+                .onChange(of: store.slashSelection) { _, i in
+                    if let id = store.slashItems[safe: i]?.id { withAnimation(.easeOut(duration: 0.12)) { proxy.scrollTo(id) } }
+                }
+            }
+            HStack(spacing: 12) {
+                hint("↑↓", "navigate"); hint("↩", "run"); hint("⇥", "insert"); hint("esc", "close")
+                Spacer()
+                Text("\(store.slashItems.count) command\(store.slashItems.count == 1 ? "" : "s")")
+            }
+            .font(.system(size: 10.5))
+            .foregroundStyle(.tertiary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+        }
+        .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private func hint(_ key: String, _ label: String) -> some View {
+        HStack(spacing: 3) {
+            Text(key).font(.system(size: 10, weight: .semibold, design: .rounded))
+                .padding(.horizontal, 4).padding(.vertical, 1)
+                .background(.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
+            Text(label)
+        }
+    }
+}
+
+struct SlashRow: View {
+    let item: SlashItem
+    let selected: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: item.kind == "skill" ? "sparkles" : "command")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(selected ? Color.white : Color.secondary)
+                .frame(width: 22, height: 22)
+                .background(selected ? Color.accentColor : Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 6))
+            Text(item.display)
+                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+            Text(item.meta)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 38)
+        .background(selected ? Color.accentColor.opacity(0.16) : .clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .contentShape(Rectangle())
+    }
 }
 
 struct AttachmentChip: View {

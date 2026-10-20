@@ -16,6 +16,7 @@ This builds a Release copy into `~/Applications/Hermes Quick.app` and launches i
 |---|---|
 | Show / hide panel | ⌥Space (change it in Settings) |
 | Send | ↩ |
+| Slash commands | Type `/` for suggestions: ↑↓ choose, ↩ run, ⇥ insert to add arguments, esc close |
 | Stop the current turn | ⌘. |
 | New chat | ⌘N |
 | Dictate one message | ⌘D |

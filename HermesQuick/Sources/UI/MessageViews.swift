@@ -42,10 +42,7 @@ struct MessageRow: View {
         case .user: userBubble
         case .assistant: assistant
         case .notice, .error:
-            Text(message.text)
-                .font(.system(size: 12))
-                .foregroundStyle(message.role == .error ? .red : .secondary)
-                .frame(maxWidth: .infinity)
+            CommandOutputCard(text: message.text, isError: message.role == .error)
         }
     }
 
@@ -206,5 +203,46 @@ struct ShimmerText: View {
                         .mask(Text(text).font(.system(size: 14, weight: .medium)))
                 }
         }
+    }
+}
+
+/// Output of a slash command (or an error), shown as a quiet card in the transcript.
+struct CommandOutputCard: View {
+    let text: String
+    let isError: Bool
+    @State private var expanded = false
+
+    var body: some View {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        let long = lines.count > 14
+        VStack(alignment: .leading, spacing: 6) {
+            Group {
+                if isError {
+                    Label(text, systemImage: "exclamationmark.triangle.fill")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(.red)
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        Text(long && !expanded ? lines.prefix(14).joined(separator: "\n") : text)
+                            .font(.system(size: 11.5, design: .monospaced))
+                            .textSelection(.enabled)
+                            .fixedSize()
+                    }
+                }
+            }
+            if long && !isError {
+                Button(expanded ? "Show less" : "Show all \(lines.count) lines") {
+                    withAnimation(.snappy) { expanded.toggle() }
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.tint)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background((isError ? Color.red : Color.primary).opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.primary.opacity(0.06)))
     }
 }

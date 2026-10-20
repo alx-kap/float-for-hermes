@@ -57,8 +57,19 @@ final class PanelController {
         panel.onCancel = { [weak self] in self?.hide() }
         // ⌘V with a copied file or image attaches it instead of pasting text.
         pasteMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self, weak store] event in
-            guard let self, let store, event.window === self.panel,
-                  event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+            guard let self, let store, event.window === self.panel else { return event }
+            // Slash menu keys win over the text field.
+            if store.showSlash, event.modifierFlags.intersection([.command, .option, .control]).isEmpty {
+                switch event.keyCode {
+                case 125: store.moveSlash(1); return nil          // ↓
+                case 126: store.moveSlash(-1); return nil         // ↑
+                case 48: store.insertSlash(); return nil          // ⇥
+                case 36, 76: store.runSelectedSlash(); return nil // ↩
+                case 53: store.dismissSlash(); return nil         // esc
+                default: break
+                }
+            }
+            guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
                   event.charactersIgnoringModifiers == "v" else { return event }
             let pb = NSPasteboard.general
             let hasFiles = pb.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true])

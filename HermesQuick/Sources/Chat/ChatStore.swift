@@ -20,6 +20,9 @@ final class ChatStore {
     var models: [ModelChoice] = []
     var bots: [BotProfile] = []
     var pendingApproval: ApprovalRequest?
+    var slashItems: [SlashItem] = []
+    var slashSelection = 0
+    @ObservationIgnored var slashTask: Task<Void, Never>?
     var lastError: String?
 
     private(set) var sessionId: String?
@@ -217,6 +220,13 @@ final class ChatStore {
     func send() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canSend else { return }
+        if text.hasPrefix("/"), attachments.isEmpty {
+            draft = ""
+            dismissSlash()
+            voice.markTypedTurn()
+            runSlash(text)
+            return
+        }
         let files = attachments
         draft = ""
         voice.markTypedTurn()
@@ -230,11 +240,13 @@ final class ChatStore {
         withAnimation { attachments.removeAll() }
     }
 
-    private func submit(text: String, files: [Attachment], voiceTurn: Bool) {
+    func submit(text: String, files: [Attachment], voiceTurn: Bool, showBubble: Bool = true) {
         lastError = nil
         withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) {
-            messages.append(ChatMessage(role: .user, text: text, attachments: files.filter { !$0.isImage }.map(\.name),
-                                        images: files.compactMap(\.thumbnail)))
+            if showBubble {
+                messages.append(ChatMessage(role: .user, text: text, attachments: files.filter { !$0.isImage }.map(\.name),
+                                            images: files.compactMap(\.thumbnail)))
+            }
             isBusy = true
             status = files.isEmpty ? "" : "Uploading \(files.count) file\(files.count == 1 ? "" : "s")…"
         }
@@ -410,7 +422,7 @@ final class ChatStore {
         }
     }
 
-    private func report(_ error: Error) {
+    func report(_ error: Error) {
         if case .needsSignIn = gateway.state { lastError = nil; return }
         withAnimation(.snappy) { lastError = error.localizedDescription }
     }
