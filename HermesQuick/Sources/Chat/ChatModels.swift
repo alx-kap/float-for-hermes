@@ -114,6 +114,12 @@ struct ChatMessage: Identifiable, Equatable {
     var images: [NSImage] = []
     var isStreaming = false
     var date = Date()
+    /// User messages: exactly what went to `prompt.submit` (file refs included), for retry and edit.
+    var sentPrompt: String?
+    /// User messages: what was attached, so a retry can upload the images again.
+    var files: [Attachment] = []
+    /// A user message that didn't go through, or a reply that ended in an error.
+    var failed = false
 }
 
 /// Something the gateway is waiting on the user for (a server→client request): a command approval,

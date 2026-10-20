@@ -11,6 +11,20 @@ struct ComposerView: View {
         let voice = store.voice
 
         VStack(spacing: 8) {
+            if store.editingMessageId != nil {
+                HStack(spacing: 6) {
+                    Image(systemName: "pencil")
+                    Text("Editing your last message. Sending replaces it and the reply.")
+                    Spacer()
+                    Button("Cancel") { store.cancelEdit() }
+                        .buttonStyle(.link)
+                        .help("Cancel (esc)")
+                }
+                .font(.system(size: 11.5, weight: .medium))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 4)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
             if !store.attachments.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
@@ -77,6 +91,7 @@ struct ComposerView: View {
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: store.attachments.count)
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: store.showSlash)
         .animation(.snappy, value: store.messages.isEmpty)
+        .animation(.snappy, value: store.editingMessageId)
         .onChange(of: store.draft) { _, text in store.updateSlash(for: text) }
         .onChange(of: presentation.focusToken) { focused = true }
         .onAppear { focused = true }
@@ -86,6 +101,7 @@ struct ComposerView: View {
     private var placeholder: String {
         let bot = store.activeBot?.displayName ?? "Hermes"
         if let q = store.activeQuestion { return q.choices.isEmpty ? "Type your answer…" : "Or type your own answer…" }
+        if store.editingMessageId != nil { return "Edit your message…" }
         return store.voice.isConversing ? "Voice mode on" : "Ask \(bot)…"
     }
 
@@ -135,7 +151,8 @@ struct ComposerView: View {
         .scaleEffect(store.canSend || store.isBusy ? 1 : 0.92)
         .animation(.spring(response: 0.3, dampingFraction: 0.6), value: store.canSend)
         .disabled(!store.isBusy && !store.canSend)
-        .help(stops ? "Stop (⌘.)" : store.activeQuestion != nil ? "Answer (↩)" : "Send (↩)")
+        .help(stops ? "Stop (⌘.)" : store.activeQuestion != nil ? "Answer (↩)"
+              : store.editingMessageId != nil ? "Send edited message (↩)" : "Send (↩)")
     }
 
     private var shortcuts: some View {
@@ -145,6 +162,7 @@ struct ComposerView: View {
             Button("") { store.voice.toggleDictation() }.keyboardShortcut("d", modifiers: .command)
             Button("") { store.voice.toggleConversation() }.keyboardShortcut("d", modifiers: [.command, .shift])
             Button("") { store.chooseFiles(over: NSApp.keyWindow) }.keyboardShortcut("o", modifiers: .command)
+            Button("") { store.regenerate() }.keyboardShortcut("r", modifiers: .command)
         }
         .opacity(0)
         .frame(width: 0, height: 0)

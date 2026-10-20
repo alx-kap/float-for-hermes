@@ -29,6 +29,9 @@ final class ChatStore {
     var lastError: String?
     /// A reply finished while the panel was hidden and hasn't been seen yet.
     var hasUnseenReply = false
+    /// The user message being edited in the composer.
+    var editingMessageId: UUID?
+    @ObservationIgnored private var editStash: (draft: String, attachments: [Attachment])?
     /// Set by the app: whether the panel is on screen.
     @ObservationIgnored var isPanelVisible: () -> Bool = { true }
 
@@ -207,6 +210,7 @@ final class ChatStore {
                 let (clean, files) = userDisplay(text)
                 guard !clean.isEmpty || !files.isEmpty else { continue }
                 var msg = ChatMessage(role: .user, text: clean, attachments: files)
+                msg.sentPrompt = text
                 if let date { msg.date = date }
                 out.append(msg)
             case "assistant":
@@ -455,6 +459,10 @@ final class ChatStore {
             answerClarify(q.multiSelect ? multiAnswer(extra: text) : text)
             return
         }
+        if editingMessageId != nil {
+            commitEdit(text)
+            return
+        }
         if text.hasPrefix("/"), attachments.isEmpty {
             draft = ""
             dismissSlash()
@@ -477,17 +485,30 @@ final class ChatStore {
 
     func submit(text: String, files: [Attachment], voiceTurn: Bool, showBubble: Bool = true) {
         lastError = nil
+        var bubble: UUID?
         withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) {
             if showBubble {
-                messages.append(ChatMessage(role: .user, text: text, attachments: files.filter { !$0.isImage }.map(\.name),
-                                            images: files.compactMap(\.thumbnail)))
+                var msg = ChatMessage(role: .user, text: text, attachments: files.filter { !$0.isImage }.map(\.name),
+                                      images: files.compactMap(\.thumbnail))
+                msg.files = files
+                bubble = msg.id
+                messages.append(msg)
             }
             isBusy = true
             status = files.isEmpty ? "" : "Uploading \(files.count) file\(files.count == 1 ? "" : "s")…"
         }
+        deliver(text: text, files: files, rawPrompt: nil, bubble: bubble, voiceTurn: voiceTurn)
+    }
+
+    /// Uploads `files`, then submits `rawPrompt` (a prompt sent before, refs included) or `text` with the new refs.
+    /// `replacing` first drops the gateway's last turn, but only if it is that message, so a send that
+    /// never arrived can't take the turn before it with it.
+    private func deliver(text: String, files: [Attachment], rawPrompt: String?, bubble: UUID?,
+                         voiceTurn: Bool, replacing old: String? = nil) {
         Task {
             do {
                 let sid = try await ensureSession()
+                if let old { try await undoLastTurn(ifItIs: old, sid: sid) }
                 var refs: [String] = []
                 for f in files {
                     if f.isImage {
@@ -503,19 +524,118 @@ final class ChatStore {
                         if let ref = res["ref_text"] as? String, !ref.isEmpty { refs.append(ref) }
                     }
                 }
-                var prompt = ([refs.joined(separator: "\n"), text].filter { !$0.isEmpty }).joined(separator: "\n\n")
+                var prompt = ([refs.joined(separator: "\n"), rawPrompt ?? text].filter { !$0.isEmpty }).joined(separator: "\n\n")
                 if prompt.isEmpty { prompt = "What do you see in this image?" }
                 status = ""
+                if let bubble, let i = messages.firstIndex(where: { $0.id == bubble }) {
+                    messages[i].sentPrompt = prompt
+                    messages[i].files = files.filter(\.isImage)  // non-image refs now live in the prompt
+                }
                 var params: JSON = ["session_id": sid, "text": prompt]
                 if voiceTurn { params["voice_turn"] = true }
                 try await gateway.call("prompt.submit", params)
             } catch {
                 isBusy = false
                 status = ""
+                if let bubble, let i = messages.firstIndex(where: { $0.id == bubble }) {
+                    withAnimation(.snappy) { messages[i].failed = true }
+                }
                 report(error)
                 voice.turnEndedWithoutSpeech()
             }
         }
+    }
+
+    private func undoLastTurn(ifItIs text: String, sid: String) async throws {
+        let res = try await gateway.call("session.history", ["session_id": sid])
+        guard let last = (res["messages"] as? [JSON] ?? []).last(where: { $0["role"] as? String == "user" }),
+              Self.userDisplay(Self.messageText(last)).0 == text.trimmingCharacters(in: .whitespacesAndNewlines) else { return }
+        try await gateway.call("session.undo", ["session_id": sid, "intent": "retry"])
+    }
+
+    // MARK: Retry, regenerate, edit
+
+    private var lastUserIndex: Int? { messages.lastIndex { $0.role == .user } }
+
+    /// Regenerate and retry need an idle chat with something to resend.
+    var canRegenerate: Bool {
+        !isBusy && activePrompt == nil && editingMessageId == nil && !voice.isConversing && lastUserIndex != nil
+    }
+
+    /// Sends the last message again: a fresh reply, or a retry after it failed.
+    func regenerate() {
+        guard canRegenerate, let u = lastUserIndex else { return }
+        let msg = messages[u]
+        lastError = nil
+        voice.markTypedTurn()
+        withAnimation(.smooth(duration: 0.3)) {
+            if u + 1 < messages.count { messages.removeSubrange((u + 1)...) }
+            messages[u].failed = false
+            isBusy = true
+        }
+        // A message that never got as far as submitting has no turn on the gateway to replace.
+        let reachedGateway = msg.sentPrompt != nil
+        deliver(text: msg.text, files: reachedGateway ? msg.files.filter(\.isImage) : msg.files,
+                rawPrompt: msg.sentPrompt, bubble: msg.id, voiceTurn: false, replacing: reachedGateway ? msg.text : nil)
+    }
+
+    var canEdit: Bool { canRegenerate }
+
+    /// Puts the last message back in the composer; sending replaces it and its reply.
+    func beginEdit() {
+        guard canEdit, let u = lastUserIndex else { return }
+        let msg = messages[u]
+        editStash = (draft, attachments)
+        dismissSlash()
+        withAnimation(.snappy) {
+            editingMessageId = msg.id
+            draft = msg.text
+            attachments = msg.files
+        }
+    }
+
+    func cancelEdit() {
+        guard editingMessageId != nil else { return }
+        withAnimation(.snappy) {
+            editingMessageId = nil
+            draft = editStash?.draft ?? ""
+            attachments = editStash?.attachments ?? []
+        }
+        editStash = nil
+    }
+
+    private func commitEdit(_ text: String) {
+        guard let id = editingMessageId, let u = messages.firstIndex(where: { $0.id == id }) else { return cancelEdit() }
+        let old = messages[u]
+        let files = attachments
+        // Files attached in an earlier session are only refs in the stored prompt: keep them around the new text.
+        var raw: String?
+        if old.files.isEmpty, !old.attachments.isEmpty, let p = old.sentPrompt, !old.text.isEmpty, p.contains(old.text) {
+            raw = p.replacingOccurrences(of: old.text, with: text)
+        }
+        var msg = ChatMessage(role: .user, text: text, attachments: files.filter { !$0.isImage }.map(\.name) + (raw == nil ? [] : old.attachments),
+                              images: files.compactMap(\.thumbnail))
+        msg.files = files
+        lastError = nil
+        draft = ""
+        editStash = nil
+        voice.markTypedTurn()
+        withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) {
+            messages.removeSubrange(u...)
+            messages.append(msg)
+            editingMessageId = nil
+            attachments = []
+            isBusy = true
+        }
+        deliver(text: text, files: files, rawPrompt: raw, bubble: msg.id, voiceTurn: false,
+                replacing: old.sentPrompt != nil ? old.text : nil)
+    }
+
+    /// ↑ in an empty composer: bring back the last thing you sent, to send again or tweak.
+    func recallLastPrompt() -> Bool {
+        guard draft.isEmpty, editingMessageId == nil, let u = lastUserIndex, !messages[u].text.isEmpty else { return false }
+        draft = messages[u].text
+        return true
     }
 
     func interrupt() {
@@ -603,6 +723,12 @@ final class ChatStore {
     }
 
     private func clearPrompts() {
+        if editingMessageId != nil {
+            draft = editStash?.draft ?? ""
+            attachments = editStash?.attachments ?? []
+        }
+        editingMessageId = nil
+        editStash = nil
         prompts.forEach { Notifier.shared.withdraw($0.id) }
         prompts.removeAll()
         clarifySelection = []
@@ -737,7 +863,13 @@ final class ChatStore {
             if let id = p["id"] as? String { removePrompt(id) }
         case "error":
             report(RPCError(code: 0, message: p["message"] as? String ?? "Error"))
-            if streamingIndex == nil { isBusy = false }
+            if streamingIndex == nil {
+                // The turn died before a reply started: offer a retry on the message.
+                if isBusy, let last = messages.indices.last, messages[last].role == .user {
+                    withAnimation(.snappy) { messages[last].failed = true }
+                }
+                isBusy = false
+            }
         default:
             break
         }
@@ -757,6 +889,7 @@ final class ChatStore {
         guard let i = streamingIndex, i < messages.count else { return }
         if let final = p["text"] as? String, !final.isEmpty { messages[i].text = final }
         if let err = p["error"] as? String, !err.isEmpty {
+            messages[i].failed = true
             messages[i].text += (messages[i].text.isEmpty ? "" : "\n\n") + "⚠️ " + err
         }
         let status = p["status"] as? String ?? ""

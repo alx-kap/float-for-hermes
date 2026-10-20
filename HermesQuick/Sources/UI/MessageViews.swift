@@ -6,8 +6,11 @@ struct MessageList: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 14) {
-                ForEach(store.messages) { msg in
-                    MessageRow(message: msg)
+                // Only the latest exchange can be edited, retried or regenerated (session.undo drops the last turn).
+                let lastUser = store.messages.lastIndex { $0.role == .user }
+                let lastReply = store.messages.lastIndex { $0.role == .assistant }.flatMap { $0 > (lastUser ?? -1) ? $0 : nil }
+                ForEach(Array(store.messages.enumerated()), id: \.element.id) { i, msg in
+                    MessageRow(message: msg, isLatestUser: i == lastUser, isLatestReply: i == lastReply)
                         .id(msg.id)
                         .transition(.asymmetric(
                             insertion: .move(edge: .bottom).combined(with: .opacity).combined(with: .scale(scale: 0.98, anchor: .bottom)),
@@ -35,7 +38,13 @@ struct MessageList: View {
 }
 
 struct MessageRow: View {
+    @Environment(ChatStore.self) private var store
     let message: ChatMessage
+    var isLatestUser = false
+    var isLatestReply = false
+    @State private var hovering = false
+
+    private var isEditing: Bool { store.editingMessageId == message.id }
 
     var body: some View {
         switch message.role {
@@ -47,44 +56,79 @@ struct MessageRow: View {
     }
 
     private var userBubble: some View {
-        HStack {
-            Spacer(minLength: 80)
-            VStack(alignment: .trailing, spacing: 6) {
-                if !message.images.isEmpty {
-                    HStack(spacing: 6) {
-                        ForEach(Array(message.images.enumerated()), id: \.offset) { _, img in
-                            Image(nsImage: img)
-                                .resizable().aspectRatio(contentMode: .fill)
-                                .frame(width: message.images.count == 1 ? 180 : 84, height: message.images.count == 1 ? 120 : 84)
-                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        }
-                    }
+        VStack(alignment: .trailing, spacing: 5) {
+            HStack(alignment: .center, spacing: 6) {
+                Spacer(minLength: 80)
+                if isLatestUser && store.canEdit && !message.failed {
+                    MessageAction(symbol: "pencil", help: "Edit") { store.beginEdit() }
+                        .opacity(hovering ? 1 : 0)
                 }
-                if !message.attachments.isEmpty {
-                    HStack(spacing: 4) {
-                        ForEach(message.attachments, id: \.self) { name in
-                            Label(name, systemImage: "paperclip")
-                                .font(.system(size: 11))
-                                .lineLimit(1)
-                                .padding(.horizontal, 8).padding(.vertical, 3)
-                                .background(.white.opacity(0.18), in: Capsule())
-                        }
-                    }
+                bubble
+            }
+            if isEditing {
+                Label("Editing", systemImage: "pencil")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .transition(.opacity)
+            } else if message.failed && isLatestUser {
+                HStack(spacing: 6) {
+                    Label("Didn't go through", systemImage: "exclamationmark.circle.fill")
+                        .foregroundStyle(.red)
+                    Button("Retry") { store.regenerate() }
+                        .buttonStyle(.link)
+                        .disabled(!store.canRegenerate)
                 }
-                if !message.text.isEmpty {
-                    Text(message.text)
-                        .font(.system(size: 14))
-                        .textSelection(.enabled)
+                .font(.system(size: 11.5, weight: .medium))
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .onHover { h in withAnimation(.easeOut(duration: 0.15)) { hovering = h } }
+        .contextMenu {
+            Button("Copy") { copy(message.text) }
+            if isLatestUser {
+                Button("Edit") { store.beginEdit() }.disabled(!store.canEdit)
+                Button(message.failed ? "Retry" : "Send Again") { store.regenerate() }.disabled(!store.canRegenerate)
+            }
+        }
+    }
+
+    private var bubble: some View {
+        VStack(alignment: .trailing, spacing: 6) {
+            if !message.images.isEmpty {
+                HStack(spacing: 6) {
+                    ForEach(Array(message.images.enumerated()), id: \.offset) { _, img in
+                        Image(nsImage: img)
+                            .resizable().aspectRatio(contentMode: .fill)
+                            .frame(width: message.images.count == 1 ? 180 : 84, height: message.images.count == 1 ? 120 : 84)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
                 }
             }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 9)
-            .background(
-                LinearGradient(colors: [Color.accentColor, Color.accentColor.opacity(0.82)],
-                               startPoint: .top, endPoint: .bottom),
-                in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            if !message.attachments.isEmpty {
+                HStack(spacing: 4) {
+                    ForEach(message.attachments, id: \.self) { name in
+                        Label(name, systemImage: "paperclip")
+                            .font(.system(size: 11))
+                            .lineLimit(1)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(.white.opacity(0.18), in: Capsule())
+                    }
+                }
+            }
+            if !message.text.isEmpty {
+                Text(message.text)
+                    .font(.system(size: 14))
+                    .textSelection(.enabled)
+            }
         }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+        .background(
+            LinearGradient(colors: [Color.accentColor, Color.accentColor.opacity(0.82)],
+                           startPoint: .top, endPoint: .bottom),
+            in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .opacity(isEditing ? 0.45 : 1)
     }
 
     private var assistant: some View {
@@ -103,15 +147,68 @@ struct MessageRow: View {
             if !message.isStreaming {
                 let media = MediaRef.extract(from: message.text)
                 if !media.isEmpty { MediaGallery(refs: media) }
+                if isLatestReply { replyActions }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .onHover { h in withAnimation(.easeOut(duration: 0.15)) { hovering = h } }
         .contextMenu {
-            Button("Copy") {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(message.text, forType: .string)
+            Button("Copy") { copy(message.text) }
+            if isLatestReply {
+                Button("Regenerate") { store.regenerate() }
+                    .keyboardShortcut("r", modifiers: .command)
+                    .disabled(!store.canRegenerate)
             }
         }
+    }
+
+    /// Under the latest reply: Copy and Regenerate on hover, or a Try Again that stays put after an error.
+    @ViewBuilder
+    private var replyActions: some View {
+        if message.failed {
+            Button { store.regenerate() } label: {
+                Label("Try Again", systemImage: "arrow.clockwise")
+            }
+            .buttonStyle(.glass)
+            .controlSize(.small)
+            .disabled(!store.canRegenerate)
+            .help("Try again (⌘R)")
+        } else {
+            HStack(spacing: 2) {
+                MessageAction(symbol: "doc.on.doc", help: "Copy") { copy(message.text) }
+                MessageAction(symbol: "arrow.clockwise", help: "Regenerate (⌘R)") { store.regenerate() }
+                    .disabled(!store.canRegenerate)
+            }
+            .opacity(hovering ? 1 : 0)
+        }
+    }
+
+    private func copy(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+}
+
+/// A small borderless icon button shown on hover next to a message.
+struct MessageAction: View {
+    let symbol: String
+    let help: String
+    let action: () -> Void
+    @State private var hovering = false
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 11.5, weight: .medium))
+                .frame(width: 24, height: 22)
+                .background(.primary.opacity(hovering && isEnabled ? 0.08 : 0), in: RoundedRectangle(cornerRadius: 6))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(hovering ? .primary : .secondary)
+        .help(help)
+        .onHover { hovering = $0 }
     }
 }
 

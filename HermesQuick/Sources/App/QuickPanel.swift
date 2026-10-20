@@ -88,6 +88,13 @@ final class PanelController {
                 default: break
                 }
             }
+            if mods.isEmpty, !store.showSlash, !store.showingHistory {
+                // esc leaves edit mode instead of hiding the panel.
+                if event.keyCode == 53, store.editingMessageId != nil { store.cancelEdit(); return nil }
+                // ↑ in an empty composer brings back the last message (not while a card's own field has focus).
+                if event.keyCode == 126, !(self.panel.firstResponder is NSSecureTextField),
+                   store.activePrompt == nil, store.recallLastPrompt() { return nil }
+            }
             guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
                   event.charactersIgnoringModifiers == "v" else { return event }
             let pb = NSPasteboard.general
