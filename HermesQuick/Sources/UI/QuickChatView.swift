@@ -166,6 +166,7 @@ struct HeaderBar: View {
     @Environment(ChatStore.self) private var store
     @Environment(\.openSettings) private var openSettings
     @AppStorage("settingsPane") private var settingsPane: SettingsPane = .general
+    @State private var showingPicker = false
 
     private var botName: String { store.botName }
 
@@ -173,9 +174,11 @@ struct HeaderBar: View {
         HStack(spacing: 10) {
             // Title first; who and which model sit underneath as a subtitle that opens the bot/model menu.
             // Only the title flexes, so a long name truncates and nothing else moves.
-            identityMenu {
+            Button { showingPicker.toggle() } label: {
                 BotAvatar(name: botName, size: 30)
             }
+            .buttonStyle(.plain)
+            .help("Switch model or thinking")
             VStack(alignment: .leading, spacing: 1) {
                 if store.showingHistory {
                     Text("Chats")
@@ -185,18 +188,45 @@ struct HeaderBar: View {
                     ChatTitle()
                         .transition(.handoff)
                 }
-                identityMenu {
+                Button { showingPicker.toggle() } label: {
                     HStack(spacing: 3) {
-                        Text("\(botName) · \(shortModel)")
+                        Text("\(botName) ·")
+                            .lineLimit(1)
+                            .layoutPriority(1)
+                        // The popover points at the model name: what it's for, and nothing before it
+                        // changes width (the ⚡ comes and goes after it).
+                        Text(shortModel)
                             .lineLimit(1)
                             .truncationMode(.middle)
                             .contentTransition(.numericText())
+                            .popover(isPresented: $showingPicker, arrowEdge: .bottom) {
+                                ModelPicker(chooseModels: {
+                                    settingsPane = .models
+                                    NSApp.activate()
+                                    openSettings()
+                                }, dismiss: { showingPicker = false })
+                                .environment(store)
+                            }
+                        if store.currentCapabilities.reasoning {
+                            Text("·")
+                            ThinkingBadge(level: store.thinking)
+                        }
+                        if store.fastMode {
+                            Image(systemName: "bolt.fill")
+                                .font(.system(size: 9.5, weight: .semibold))
+                                .foregroundStyle(.orange)
+                                .help("Fast mode is on")
+                                .transition(.scale.combined(with: .opacity))
+                        }
                         Image(systemName: "chevron.down")
                             .font(.system(size: 8, weight: .bold))
                     }
                     .font(.system(size: 11.5))
                     .foregroundStyle(.secondary)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .help("Switch model or thinking")
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -232,71 +262,8 @@ struct HeaderBar: View {
         }
     }
 
-    /// The avatar and the subtitle both open this: bots, then models by provider, then Settings.
-    private func identityMenu<MenuLabel: View>(@ViewBuilder label: () -> MenuLabel) -> some View {
-        Menu {
-            Section("Bot") {
-                if store.bots.isEmpty { Text("No bots found") }
-                ForEach(store.bots) { bot in
-                    Button {
-                        store.switchBot(bot)
-                    } label: {
-                        if bot.name == Preferences.shared.profile { Label(bot.displayName, systemImage: "checkmark") }
-                        else { Text(bot.displayName) }
-                    }
-                }
-            }
-            let groups = Dictionary(grouping: store.models, by: \.providerName)
-            ForEach(groups.keys.sorted(), id: \.self) { provider in
-                let choices = groups[provider] ?? []
-                let primary = choices.filter(store.isPrimary)
-                let more = choices.filter { !store.isPrimary($0) }
-                Section(provider) {
-                    ForEach(primary) { modelButton($0) }
-                    if !more.isEmpty {
-                        Menu("More Models") {
-                            ForEach(more) { modelButton($0) }
-                        }
-                    }
-                }
-            }
-            if store.models.isEmpty { Text("Loading models…") }
-            Divider()
-            Button("Choose Models…") {
-                settingsPane = .models
-                NSApp.activate()
-                openSettings()
-            }
-            Button("Settings…") {
-                NSApp.activate()
-                openSettings()
-            }
-        } label: {
-            label()
-        }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help("Switch bot or model")
-    }
-
-    private func isCurrent(_ choice: ModelChoice) -> Bool {
-        choice.model == store.currentModel && choice.provider == store.currentProvider
-    }
-
-    private func modelButton(_ choice: ModelChoice) -> some View {
-        Button {
-            store.selectModel(choice)
-        } label: {
-            if isCurrent(choice) { Label(choice.model, systemImage: "checkmark") }
-            else { Text(choice.model) }
-        }
-    }
-
     private var shortModel: String {
-        let m = store.currentModel.isEmpty ? "Model" : store.currentModel
-        return m.split(separator: "/").last.map(String.init) ?? m
+        store.currentModel.isEmpty ? "Model" : ModelChoice.displayName(store.currentModel)
     }
 }
 
@@ -609,4 +576,19 @@ struct BehindWindowBlur: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
+}
+
+/// The open chat's thinking level in the header: a brain and the level's name.
+struct ThinkingBadge: View {
+    let level: ThinkingLevel
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "brain")
+                .font(.system(size: 9.5))
+            Text(level == .none ? "No thinking" : level.shortTitle)
+                .contentTransition(.numericText())
+        }
+        .help(level == .none ? "Thinking is off" : "Thinking: \(level.title)")
+    }
 }

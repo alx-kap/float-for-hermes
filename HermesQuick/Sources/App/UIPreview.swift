@@ -7,6 +7,7 @@ import SwiftUI
 ///   -uiPreview                     show the panel on a sample chat
 ///   -uiPreviewLongTitle            give the chat a long title
 ///   -uiPreviewWidth 520            panel width for this run (your saved width is put back)
+///   -uiPreviewPicker               with -uiPreviewSnapshot, render the model picker instead
 ///   -uiPreviewSnapshot out.png     render the panel to a PNG and quit. Needs no Screen Recording
 ///                                  permission, but system glass and blur can't be captured in-process.
 enum UIPreview {
@@ -42,9 +43,15 @@ enum UIPreview {
         let bot = Preferences.shared.profile
         store.auth.previewSignIn()
         store.bots = [BotProfile(name: bot, displayName: BotProfile.fallbackName(for: bot), model: "", description: "", isDefault: true)]
-        store.models = [ModelChoice(provider: "anthropic", providerName: "Anthropic", model: "claude-sonnet-4.5")]
-        store.currentProvider = "anthropic"
-        store.currentModel = "claude-sonnet-4.5"
+        store.models = ["claude-opus-5-5", "claude-sonnet-5", "claude-fable-5.1", "claude-haiku-4-5-20251001", "claude-opus-4-5-20251101"]
+            .enumerated().map { ModelChoice(provider: "anthropic", providerName: "Anthropic", model: $1, isNewest: $0 < 4) }
+            + ["gpt-6-luna", "gpt-6-sol", "gpt-5.6-terra", "gpt-5.5", "gpt-5.4-mini"]
+            .enumerated().map { ModelChoice(provider: "openai-codex", providerName: "ChatGPT", model: $1, isNewest: $0 < 4) }
+        store.modelCapabilities = ["openai-codex/gpt-6-luna": ModelCapabilities(fast: true)]
+        store.currentProvider = "openai-codex"
+        store.currentModel = "gpt-6-luna"
+        store.thinking = .high
+        store.fastMode = args.contains("-uiPreviewFast")
         store.currentTitle = args.contains("-uiPreviewLongTitle")
             ? "Figure out why the nightly restic backup to the Synology NAS keeps failing after the DSM update"
             : "Nightly backup"
@@ -74,10 +81,14 @@ enum UIPreview {
         let presentation = PanelPresentation()
         presentation.isPresented = true
         let size = QuickPanel.fittingSize()
-        let view = QuickChatView()
+        let panel = QuickChatView()
             .environment(store)
             .environment(presentation)
             .frame(width: size.width, height: size.height)
+        let picker = ModelPicker(chooseModels: {}, dismiss: {}).environment(store).padding(8)
+        let view = Group {
+            if args.contains("-uiPreviewPicker") { AnyView(picker) } else { AnyView(panel) }
+        }
             .background(Color(red: 0.12, green: 0.14, blue: 0.2))
             .environment(\.colorScheme, .dark)
         let renderer = ImageRenderer(content: view)

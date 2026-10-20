@@ -20,6 +20,12 @@ final class ChatStore {
     var currentModel = ""
     var currentProvider = ""
     var models: [ModelChoice] = []
+    /// Keyed by `ModelChoice.id`. A model missing here is assumed to think and not offer fast mode.
+    var modelCapabilities: [String: ModelCapabilities] = [:]
+    var thinking: ThinkingLevel = .medium
+    /// The level the route actually sends when it can't do the one picked (e.g. Max on an older model).
+    var thinkingSent: ThinkingLevel?
+    var fastMode = false
     var bots: [BotProfile] = []
     /// Questions the gateway is waiting on, oldest first. The panel shows the first.
     var prompts: [GatewayPrompt] = []
@@ -165,7 +171,9 @@ final class ChatStore {
             if let stored = self.currentStoredId, let sid = try? await self.resume(stored) { return sid }
             let res = try await self.gateway.call("session.create", ["profile": self.prefs.profile, "source": "desktop"])
             guard let sid = res["session_id"] as? String else { throw RPCError(code: 0, message: "No session id") }
+            let (wanted, wantedFast) = (self.thinking, self.fastMode)
             self.adopt(res, sid: sid, stored: res["stored_session_id"] as? String)
+            await self.carryOver(thinking: wanted, fast: wantedFast, to: sid)
             return sid
         }
     }
@@ -411,6 +419,13 @@ final class ChatStore {
         if let m = info["model"] as? String, !m.isEmpty { currentModel = m }
         if let p = info["provider"] as? String, !p.isEmpty { currentProvider = p }
         if let running = info["running"] as? Bool, !running, streamingIndex == nil { isBusy = false }
+        // "" is the provider's default, which Hermes treats as medium.
+        if let e = info["reasoning_effort"] as? String { thinking = ThinkingLevel(gateway: e.isEmpty ? "medium" : e) }
+        if let w = info["reasoning_effort_wire"] as? String {
+            let sent = w.isEmpty ? nil : ThinkingLevel(gateway: w)
+            thinkingSent = sent == thinking ? nil : sent
+        }
+        if let f = info["fast"] as? Bool { fastMode = f }
     }
 
     func refreshBots() async {
@@ -435,8 +450,10 @@ final class ChatStore {
         // through a stray key on its machine (the Hermes desktop pickers ask for the same).
         var params: JSON = ["profile": prefs.profile, "explicit_only": true]
         if let sid = sessionId { params["session_id"] = sid }
+        await refreshThinking()
         guard let res = try? await gateway.call("model.options", params) else { return }
         var out: [ModelChoice] = []
+        var caps: [String: ModelCapabilities] = [:]
         for p in res["providers"] as? [JSON] ?? [] {
             if (p["authenticated"] as? Bool) == false { continue }
             let slug = p["slug"] as? String ?? ""
@@ -447,8 +464,13 @@ final class ChatStore {
             let newest = Set(featured.isEmpty ? Array(all.prefix(Self.newestModelsPerProvider)) : featured)
             let list = featured + all.filter { !featured.contains($0) }
             out += list.map { ModelChoice(provider: slug, providerName: name, model: $0, isNewest: newest.contains($0)) }
+            for (model, c) in p["capabilities"] as? [String: JSON] ?? [:] {
+                caps[slug + "/" + model] = ModelCapabilities(fast: c["fast"] as? Bool ?? false,
+                                                             reasoning: c["reasoning"] as? Bool ?? true)
+            }
         }
         models = out
+        modelCapabilities = caps
         if let m = res["model"] as? String, !m.isEmpty { currentModel = m }
         if let p = res["provider"] as? String, !p.isEmpty { currentProvider = p }
     }
@@ -469,6 +491,67 @@ final class ChatStore {
         case "openai-codex": "ChatGPT"
         case "anthropic": "Anthropic"
         default: name
+        }
+    }
+
+    // MARK: Thinking and fast mode
+
+    var currentCapabilities: ModelCapabilities {
+        modelCapabilities[currentProvider + "/" + currentModel] ?? ModelCapabilities()
+    }
+
+    /// Before a chat exists the gateway answers with the profile's defaults.
+    func refreshThinking() async {
+        var params: JSON = ["key": "reasoning"]
+        if let sid = sessionId { params["session_id"] = sid }
+        if let res = try? await gateway.call("config.get", params), let v = res["value"] as? String {
+            thinking = ThinkingLevel(gateway: v)
+        }
+        params["key"] = "fast"
+        if let res = try? await gateway.call("config.get", params), let v = res["value"] as? String {
+            fastMode = v != "normal"
+        }
+    }
+
+    func setThinking(_ level: ThinkingLevel) {
+        let previous = (thinking, thinkingSent)
+        withAnimation(.snappy) { thinking = level; thinkingSent = nil }
+        Task {
+            do {
+                let sid = try await ensureSession()
+                try await gateway.call("config.set", ["key": "reasoning", "value": level.rawValue, "session_id": sid])
+            } catch {
+                (thinking, thinkingSent) = previous
+                report(error)
+            }
+        }
+    }
+
+    func setFastMode(_ on: Bool) {
+        let previous = fastMode
+        withAnimation(.snappy) { fastMode = on }
+        Task {
+            do {
+                let sid = try await ensureSession()
+                try await gateway.call("config.set", ["key": "fast", "value": on ? "fast" : "normal", "session_id": sid])
+            } catch {
+                withAnimation(.snappy) { fastMode = previous }
+                report(error)
+            }
+        }
+    }
+
+    /// The gateway starts each new chat on the profile's defaults; keep what was picked in the last one.
+    private func carryOver(thinking wanted: ThinkingLevel, fast wantedFast: Bool, to sid: String) async {
+        if thinking != wanted {
+            if (try? await gateway.call("config.set", ["key": "reasoning", "value": wanted.rawValue, "session_id": sid])) != nil {
+                thinking = wanted
+            }
+        }
+        if fastMode != wantedFast, !wantedFast || currentCapabilities.fast {
+            if (try? await gateway.call("config.set", ["key": "fast", "value": wantedFast ? "fast" : "normal", "session_id": sid])) != nil {
+                fastMode = wantedFast
+            }
         }
     }
 

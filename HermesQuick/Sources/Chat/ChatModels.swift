@@ -358,4 +358,61 @@ struct ModelChoice: Identifiable, Hashable {
     let model: String
     /// One of its provider's newest few, which the menu shows when no favourites are picked.
     var isNewest = true
+
+    var displayName: String { Self.displayName(model) }
+
+    /// "claude-opus-4-5-20251101" → "Opus 4.5", "gpt-5.6-terra" → "GPT-5.6 Terra", "kimi-k2.6" → "Kimi K2.6".
+    static func displayName(_ id: String) -> String {
+        var s = id.split(separator: "/").last.map(String.init) ?? id
+        s = s.replacingOccurrences(of: #"-\d{8}$"#, with: "", options: .regularExpression)
+        let parts = s.split(separator: "-").map(String.init)
+        func word(_ p: String) -> String { p.prefix(1).uppercased() + p.dropFirst() }
+        if parts.first == "claude", parts.count > 1 {
+            let rest = parts.dropFirst()
+            let words = rest.filter { !($0.first?.isNumber ?? false) }.map(word)
+            let version = rest.filter { $0.first?.isNumber ?? false }.joined(separator: ".")
+            return (words + (version.isEmpty ? [] : [version])).joined(separator: " ")
+        }
+        if parts.first == "gpt", parts.count > 1 {
+            return (["GPT-" + parts[1]] + parts.dropFirst(2).map(word)).joined(separator: " ")
+        }
+        return parts.map(word).joined(separator: " ")
+    }
+}
+
+/// How hard the model thinks before answering. Raw values are the gateway's `reasoning` words.
+enum ThinkingLevel: String, CaseIterable, Identifiable {
+    case none, low, medium, high, xhigh, max
+
+    var id: String { rawValue }
+
+    init(gateway word: String) {
+        self = ThinkingLevel(rawValue: word.lowercased()) ?? (word.lowercased() == "minimal" ? .low : .medium)
+    }
+
+    var title: String {
+        switch self {
+        case .none: "Off"
+        case .low: "Low"
+        case .medium: "Medium"
+        case .high: "High"
+        case .xhigh: "Extra High"
+        case .max: "Max"
+        }
+    }
+
+    /// For the header, where room is tight.
+    var shortTitle: String {
+        switch self {
+        case .xhigh: "XHigh"
+        case .medium: "Med"
+        default: title
+        }
+    }
+}
+
+/// What the gateway says a model can do.
+struct ModelCapabilities: Hashable {
+    var fast = false
+    var reasoning = true
 }
