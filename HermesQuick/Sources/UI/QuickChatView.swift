@@ -157,6 +157,10 @@ struct HeaderBar: View {
                 ThinkingDots()
                     .transition(.scale.combined(with: .opacity))
             }
+            if !store.showingHistory, let usage = store.usage, usage.contextFraction != nil {
+                ContextGauge(usage: usage)
+                    .transition(.scale.combined(with: .opacity))
+            }
             IconButton(symbol: "clock.arrow.circlepath", help: "Past chats (⌘K)",
                        active: store.showingHistory) { store.toggleHistory() }
             IconButton(symbol: "square.and.pencil", help: "New chat (⌘N)") { store.newChat() }

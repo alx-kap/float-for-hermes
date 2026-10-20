@@ -120,6 +120,63 @@ struct ChatMessage: Identifiable, Equatable {
     var files: [Attachment] = []
     /// A user message that didn't go through, or a reply that ended in an error.
     var failed = false
+    /// A user message waiting for the connection to come back.
+    var queued = false
+}
+
+/// Token counters and context-window fill from `session.usage` / `message.complete`.
+struct UsageInfo: Equatable {
+    var contextUsed: Int?
+    var contextMax: Int?
+    var contextPercent: Int?
+    var contextEstimated = false
+    var input = 0
+    var output = 0
+    var reasoning = 0
+    var total = 0
+    var calls = 0
+    var compressions = 0
+    var cacheHitPercent: Int?
+
+    init?(_ j: JSON?) {
+        guard let j, !j.isEmpty else { return nil }
+        func int(_ k: String) -> Int? { (j[k] as? NSNumber)?.intValue }
+        contextUsed = int("context_used")
+        contextMax = int("context_max")
+        contextPercent = int("context_percent")
+        contextEstimated = j["context_estimated"] as? Bool ?? false
+        input = int("input") ?? 0
+        output = int("output") ?? 0
+        reasoning = int("reasoning") ?? 0
+        total = int("total") ?? 0
+        calls = int("calls") ?? 0
+        compressions = int("compressions") ?? 0
+        cacheHitPercent = int("cache_hit_pct")
+    }
+
+    /// 0…1 of the context window in use, when the gateway knows both numbers.
+    var contextFraction: Double? {
+        guard let used = contextUsed, let max = contextMax, max > 0 else { return nil }
+        return min(1, Double(used) / Double(max))
+    }
+
+    /// 1234 → "1.2K", 200000 → "200K", 1200000 → "1.2M".
+    static func compact(_ n: Int) -> String {
+        func trim(_ v: Double) -> String {
+            let s = String(format: v < 10 ? "%.1f" : "%.0f", v)
+            return s.hasSuffix(".0") ? String(s.dropLast(2)) : s
+        }
+        if n >= 1_000_000 { return trim(Double(n) / 1_000_000) + "M" }
+        if n >= 1_000 { return trim(Double(n) / 1_000) + "K" }
+        return "\(n)"
+    }
+}
+
+/// One category of `session.context_breakdown` (system prompt, tools, conversation…).
+struct ContextSlice: Identifiable, Equatable {
+    let id: String
+    let label: String
+    let tokens: Int
 }
 
 /// Something the gateway is waiting on the user for (a server→client request): a command approval,

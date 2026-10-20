@@ -64,12 +64,22 @@ struct MessageRow: View {
                         .opacity(hovering ? 1 : 0)
                 }
                 bubble
+                    .opacity(message.queued ? 0.6 : 1)
             }
             if isEditing {
                 Label("Editing", systemImage: "pencil")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.secondary)
                     .transition(.opacity)
+            } else if message.queued {
+                HStack(spacing: 6) {
+                    Label("Waiting for connection. It sends when Hermes is back.", systemImage: "clock")
+                        .foregroundStyle(.secondary)
+                    Button("Cancel") { store.cancelQueuedSend() }
+                        .buttonStyle(.link)
+                }
+                .font(.system(size: 11.5, weight: .medium))
+                .transition(.opacity.combined(with: .move(edge: .top)))
             } else if message.failed && isLatestUser {
                 HStack(spacing: 6) {
                     Label("Didn't go through", systemImage: "exclamationmark.circle.fill")

@@ -29,6 +29,24 @@ final class ChatStore {
     var lastError: String?
     /// A reply finished while the panel was hidden and hasn't been seen yet.
     var hasUnseenReply = false
+    /// Token counters and context fill for the open chat.
+    var usage: UsageInfo?
+    var contextSlices: [ContextSlice] = []
+    /// A send that hit a dropped connection; it goes out once the gateway is back.
+    @ObservationIgnored private var queuedSend: QueuedSend?
+    @ObservationIgnored private var queueTask: Task<Void, Never>?
+
+    private struct QueuedSend {
+        let bubble: UUID?
+        let text: String
+        let files: [Attachment]
+        let rawPrompt: String?
+        let voiceTurn: Bool
+        let replacing: String?
+        /// prompt.submit was on its way when the line dropped, so the gateway may already have it.
+        let submitAttempted: Bool
+    }
+
     /// The user message being edited in the composer.
     var editingMessageId: UUID?
     @ObservationIgnored private var editStash: (draft: String, attachments: [Attachment])?
@@ -64,6 +82,7 @@ final class ChatStore {
         gateway.onReconnect = { [weak self] in
             // Runtime session ids don't survive a socket; rebind to the stored session.
             self?.sessionId = nil
+            Task { await self?.flushQueue() }
         }
         voice.onUtterance = { [weak self] text in self?.sendVoice(text) }
     }
@@ -100,7 +119,7 @@ final class ChatStore {
         auth.signOut()
         sessionId = nil
         messages.removeAll()
-        clearPrompts()
+        resetChatState()
     }
 
     func newChat() {
@@ -112,7 +131,7 @@ final class ChatStore {
         withAnimation(.smooth(duration: 0.35)) {
             messages.removeAll()
             attachments.removeAll()
-            clearPrompts()
+            resetChatState()
             status = ""
             currentTitle = ""
             showingHistory = false
@@ -129,7 +148,7 @@ final class ChatStore {
         historySelection = 0
         withAnimation(.smooth(duration: 0.35)) {
             messages.removeAll()
-            clearPrompts()
+            resetChatState()
             currentTitle = ""
         }
         warmUp()
@@ -173,8 +192,11 @@ final class ChatStore {
         if let info = res["info"] as? JSON { applyInfo(info) }
         let history = Self.transcript(res["messages"] as? [JSON] ?? [])
         if messages.isEmpty || !history.isEmpty {
-            withAnimation(.smooth(duration: 0.3)) { messages = Array(history.suffix(200)) }
+            // A message still waiting to go out isn't in the stored transcript yet: keep it at the end.
+            let waiting = messages.filter(\.queued)
+            withAnimation(.smooth(duration: 0.3)) { messages = Array(history.suffix(200)) + waiting }
         }
+        Task { await refreshUsage() }
         if res["running"] as? Bool == true { isBusy = true }
         // Questions still waiting from before we (re)attached; nothing listed means none are open.
         let open = res["open_requests"] as? [JSON] ?? []
@@ -303,7 +325,7 @@ final class ChatStore {
         streamingIndex = nil
         withAnimation(.smooth(duration: 0.3)) {
             messages.removeAll()
-            clearPrompts()
+            resetChatState()
             status = ""
             isBusy = false
             currentTitle = s.title
@@ -434,6 +456,7 @@ final class ChatStore {
                     params["confirm_expensive_model"] = true
                     res = try await gateway.call("config.set", params)
                 }
+                await refreshUsage()
             } catch {
                 (currentModel, currentProvider) = previous
                 report(error)
@@ -505,7 +528,14 @@ final class ChatStore {
     /// never arrived can't take the turn before it with it.
     private func deliver(text: String, files: [Attachment], rawPrompt: String?, bubble: UUID?,
                          voiceTurn: Bool, replacing old: String? = nil) {
+        if case .failed = gateway.state {
+            // Already offline: don't make them wait out a connect timeout to find out.
+            queue(QueuedSend(bubble: bubble, text: text, files: files, rawPrompt: rawPrompt,
+                             voiceTurn: voiceTurn, replacing: old, submitAttempted: false))
+            return
+        }
         Task {
+            var submitting = false
             do {
                 let sid = try await ensureSession()
                 if let old { try await undoLastTurn(ifItIs: old, sid: sid) }
@@ -533,10 +563,17 @@ final class ChatStore {
                 }
                 var params: JSON = ["session_id": sid, "text": prompt]
                 if voiceTurn { params["voice_turn"] = true }
+                submitting = true
                 try await gateway.call("prompt.submit", params)
             } catch {
-                isBusy = false
                 status = ""
+                if isConnectionLost(error) {
+                    // Keep it and send it when the gateway is back, rather than failing.
+                    queue(QueuedSend(bubble: bubble, text: text, files: files, rawPrompt: rawPrompt,
+                                     voiceTurn: voiceTurn, replacing: old, submitAttempted: submitting))
+                    return
+                }
+                isBusy = false
                 if let bubble, let i = messages.firstIndex(where: { $0.id == bubble }) {
                     withAnimation(.snappy) { messages[i].failed = true }
                 }
@@ -551,6 +588,92 @@ final class ChatStore {
         guard let last = (res["messages"] as? [JSON] ?? []).last(where: { $0["role"] as? String == "user" }),
               Self.userDisplay(Self.messageText(last)).0 == text.trimmingCharacters(in: .whitespacesAndNewlines) else { return }
         try await gateway.call("session.undo", ["session_id": sid, "intent": "retry"])
+    }
+
+    // MARK: Offline queue
+
+    var hasQueuedSend: Bool { messages.contains(where: \.queued) }
+
+    private func isConnectionLost(_ error: Error) -> Bool {
+        if case .needsSignIn = gateway.state { return false }
+        return gateway.state != .connected || error is URLError
+    }
+
+    private func queue(_ q: QueuedSend) {
+        queuedSend = q
+        isBusy = true
+        if let b = q.bubble, let i = messages.firstIndex(where: { $0.id == b }) {
+            withAnimation(.snappy) { messages[i].queued = true; messages[i].failed = false }
+        }
+        guard queueTask == nil else { return }
+        queueTask = Task {
+            var delay = 1.0
+            while queuedSend != nil, !Task.isCancelled {
+                if (try? await gateway.ensureConnected()) != nil { await flushQueue(); break }
+                try? await Task.sleep(for: .seconds(delay))
+                delay = min(delay * 2, 15)
+            }
+            queueTask = nil
+        }
+    }
+
+    private func flushQueue() async {
+        guard let q = queuedSend else { return }
+        queuedSend = nil
+        if let b = q.bubble, let i = messages.firstIndex(where: { $0.id == b }) {
+            withAnimation(.snappy) { messages[i].queued = false }
+        }
+        if q.submitAttempted, let sid = try? await ensureSession(),
+           let res = try? await gateway.call("session.history", ["session_id": sid]),
+           let last = (res["messages"] as? [JSON] ?? []).last(where: { $0["role"] as? String == "user" }),
+           Self.userDisplay(Self.messageText(last)).0 == q.text {
+            // It made it before the line dropped; the reopened chat already shows it (and the reply, if done).
+            withAnimation(.snappy) {
+                if let b = q.bubble { messages.removeAll { $0.id == b } }
+                if messages.last?.role == .assistant, streamingIndex == nil { isBusy = false }
+            }
+            return
+        }
+        deliver(text: q.text, files: q.files, rawPrompt: q.rawPrompt, bubble: q.bubble,
+                voiceTurn: q.voiceTurn, replacing: q.replacing)
+    }
+
+    /// Stop waiting. From the Stop button the message stays with a Retry; switching chats just drops it.
+    func cancelQueuedSend(markFailed: Bool = true) {
+        guard let q = queuedSend else { return }
+        queuedSend = nil
+        queueTask?.cancel()
+        queueTask = nil
+        isBusy = false
+        if let b = q.bubble, let i = messages.firstIndex(where: { $0.id == b }) {
+            withAnimation(.snappy) { messages[i].queued = false; messages[i].failed = markFailed }
+        }
+    }
+
+    // MARK: Usage
+
+    func refreshUsage() async {
+        guard let sid = sessionId, let res = try? await gateway.call("session.usage", ["session_id": sid]),
+              sid == sessionId else { return }
+        withAnimation(.snappy) { usage = UsageInfo(res) ?? usage }
+    }
+
+    /// What's taking up the context window, for the usage popover.
+    func refreshContextBreakdown() async {
+        guard let sid = sessionId,
+              let res = try? await gateway.call("session.context_breakdown", ["session_id": sid]), sid == sessionId else { return }
+        contextSlices = (res["categories"] as? [JSON] ?? []).compactMap { c in
+            guard let id = c["id"] as? String, let tokens = (c["tokens"] as? NSNumber)?.intValue, tokens > 0 else { return nil }
+            return ContextSlice(id: id, label: c["label"] as? String ?? id, tokens: tokens)
+        }
+        // The breakdown carries fresher context numbers than the last usage tick.
+        if var u = usage ?? UsageInfo(["total": 0]) {
+            if let used = (res["context_used"] as? NSNumber)?.intValue, used > 0 { u.contextUsed = used }
+            if let max = (res["context_max"] as? NSNumber)?.intValue, max > 0 { u.contextMax = max }
+            if let pct = (res["context_percent"] as? NSNumber)?.intValue { u.contextPercent = pct }
+            if let est = res["context_estimated"] as? Bool { u.contextEstimated = est }
+            usage = u
+        }
     }
 
     // MARK: Retry, regenerate, edit
@@ -640,6 +763,7 @@ final class ChatStore {
 
     func interrupt() {
         voice.stopSpeaking()
+        if queuedSend != nil { return cancelQueuedSend(markFailed: true) }
         guard let sid = sessionId else { return }
         Task { try? await gateway.call("session.interrupt", ["session_id": sid]) }
     }
@@ -722,7 +846,11 @@ final class ChatStore {
         }
     }
 
-    private func clearPrompts() {
+    /// Everything tied to the open chat that shouldn't follow you to another one.
+    private func resetChatState() {
+        usage = nil
+        contextSlices = []
+        cancelQueuedSend(markFailed: false)
         if editingMessageId != nil {
             draft = editStash?.draft ?? ""
             attachments = editStash?.attachments ?? []
@@ -833,7 +961,10 @@ final class ChatStore {
             if streamingIndex == nil { beginAssistant() }
             if let i = streamingIndex, i < messages.count { messages[i].reasoning += p["text"] as? String ?? "" }
         case "message.complete":
+            if let u = UsageInfo(p["usage"] as? JSON) { withAnimation(.snappy) { usage = u } }
             finishAssistant(p)
+        case "session.usage":
+            if let u = UsageInfo(p["usage"] as? JSON) { usage = u }
         case "tool.start":
             if streamingIndex == nil { beginAssistant() }
             guard let i = streamingIndex, let id = p["tool_id"] as? String else { return }
