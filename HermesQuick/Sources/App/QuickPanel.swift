@@ -46,6 +46,7 @@ final class PanelController {
     let presentation = PanelPresentation()
     private var panel: QuickPanel!
     private var hideWork: DispatchWorkItem?
+    var onShow: (() -> Void)?
 
     private var pasteMonitor: Any?
 
@@ -122,6 +123,7 @@ final class PanelController {
             presentation.isPresented = true
         }
         presentation.focusToken += 1
+        onShow?()
     }
 
     func hide() {

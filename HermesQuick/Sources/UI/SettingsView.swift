@@ -5,6 +5,7 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(ChatStore.self) private var store
     @State private var prefs = Preferences.shared
+    @State private var notifier = Notifier.shared
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
 
     var body: some View {
@@ -55,6 +56,28 @@ struct SettingsView: View {
                     }
             }
 
+            Section {
+                Toggle("Notify me when a reply is ready or Hermes needs me", isOn: $prefs.notifications)
+                    .onChange(of: prefs.notifications) { _, on in
+                        if on { Task { await notifier.ensureAuthorized() } }
+                    }
+                Toggle("Show a dot on the menu bar icon", isOn: $prefs.menuBarBadge)
+                if prefs.notifications && notifier.isDenied {
+                    LabeledContent {
+                        Button("Open System Settings…") { notifier.openSystemSettings() }
+                    } label: {
+                        Label("Notifications are turned off for Hermes Quick in System Settings.",
+                              systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } header: {
+                Text("Notifications")
+            } footer: {
+                Text("Only while the panel is hidden. Click a notification to open the chat.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             Section("Voice") {
                 Toggle("Speak replies to voice messages", isOn: $prefs.speakReplies)
                 Toggle("Send automatically when I pause", isOn: $prefs.autoSendOnPause)
@@ -75,6 +98,10 @@ struct SettingsView: View {
         .fixedSize(horizontal: false, vertical: true)
         .task {
             await store.refreshBots()
+        }
+        .task { await notifier.refresh() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await notifier.refresh() }
         }
     }
 

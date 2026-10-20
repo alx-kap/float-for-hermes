@@ -27,6 +27,10 @@ final class ChatStore {
     var slashSelection = 0
     @ObservationIgnored var slashTask: Task<Void, Never>?
     var lastError: String?
+    /// A reply finished while the panel was hidden and hasn't been seen yet.
+    var hasUnseenReply = false
+    /// Set by the app: whether the panel is on screen.
+    @ObservationIgnored var isPanelVisible: () -> Bool = { true }
 
     // Past conversations
     var sessions: [SessionSummary] = []
@@ -591,6 +595,7 @@ final class ChatStore {
     }
 
     private func removePrompt(_ id: String) {
+        Notifier.shared.withdraw(id)
         withAnimation(.snappy) {
             if prompts.first?.id == id { clarifySelection = [] }
             prompts.removeAll { $0.id == id }
@@ -598,8 +603,58 @@ final class ChatStore {
     }
 
     private func clearPrompts() {
+        prompts.forEach { Notifier.shared.withdraw($0.id) }
         prompts.removeAll()
         clarifySelection = []
+    }
+
+    // MARK: Attention
+
+    /// The menu bar dot: a reply you haven't seen, or Hermes waiting on you.
+    var needsAttention: Bool { prefs.menuBarBadge && (hasUnseenReply || !prompts.isEmpty) }
+
+    /// The panel came on screen: whatever the banners were about is in front of you now.
+    func panelDidShow() {
+        hasUnseenReply = false
+        Notifier.shared.clearAll()
+    }
+
+    private var chatName: String {
+        currentTitle.isEmpty ? (activeBot?.displayName ?? "Hermes") : currentTitle
+    }
+
+    private func announceReply(_ reply: String, failed: Bool) {
+        guard !isPanelVisible() else { return }
+        hasUnseenReply = true
+        guard prefs.notifications else { return }
+        let body = failed ? "Hermes ran into a problem with this reply." : Self.plainPreview(reply)
+        Notifier.shared.post(id: "reply:\(currentStoredId ?? "new")", title: chatName,
+                             body: body.isEmpty ? "Done." : body, thread: currentStoredId ?? "new")
+    }
+
+    private func announcePrompt(_ prompt: GatewayPrompt) {
+        guard !isPanelVisible(), prefs.notifications else { return }
+        let body: String
+        switch prompt.kind {
+        case let .approval(command, description, _):
+            body = "\(description)" + (command.isEmpty ? "" : ": \(command)")
+        case .clarify(let qs):
+            body = qs.first { !$0.locked }?.question ?? "Hermes has a question."
+        case .secret(let s):
+            body = s.title
+        }
+        Notifier.shared.post(id: prompt.id, title: "\(chatName) needs you", body: String(body.prefix(200)),
+                             thread: currentStoredId ?? "new")
+    }
+
+    /// A reply as one short plain-text line for a banner.
+    static func plainPreview(_ text: String) -> String {
+        var t = text.replacingOccurrences(of: "```[\\s\\S]*?```", with: " [code] ", options: .regularExpression)
+        t = t.replacingOccurrences(of: "!?\\[([^\\]]*)\\]\\([^)]*\\)", with: "$1", options: .regularExpression)
+        t = t.replacingOccurrences(of: "[*_`#>]+", with: "", options: .regularExpression)
+        t = t.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        t = t.trimmingCharacters(in: .whitespaces)
+        return t.count > 180 ? String(t.prefix(179)) + "…" : t
     }
 
     // MARK: Attachments
@@ -715,6 +770,7 @@ final class ChatStore {
         }
         let reply = messages[i].text
         streamingIndex = nil
+        if status != "interrupted" { announceReply(reply, failed: !(p["error"] as? String ?? "").isEmpty) }
         Task { await refreshSessions() }
         if voice.isConversing || (prefs.speakReplies && voice.lastTurnWasVoice) {
             voice.speak(reply)
@@ -730,9 +786,11 @@ final class ChatStore {
         if let prompt = GatewayPrompt(id: id, method: method, params: params) {
             // A question from a chat that isn't open comes back in its open_requests when it is.
             if let sid = sessionId, !prompt.sessionId.isEmpty, prompt.sessionId != sid { return }
+            let isNew = !prompts.contains { $0.id == id }
             withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                 if let i = prompts.firstIndex(where: { $0.id == id }) { prompts[i] = prompt } else { prompts.append(prompt) }
             }
+            if isNew { announcePrompt(prompt) }
         } else if Self.windowRequests.contains(method) {
             gateway.respondError(id: id, code: 4404, message: "Hermes Quick has no window for '\(method)'.")
         } else {

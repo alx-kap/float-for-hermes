@@ -12,6 +12,10 @@ final class Preferences {
     var speakReplies: Bool { didSet { save("speakReplies", speakReplies) } }
     var speechRate: Double { didSet { save("speechRate", speechRate) } }
     var autoSendOnPause: Bool { didSet { save("autoSendOnPause", autoSendOnPause) } }
+    /// Banners when a reply finishes or Hermes needs an answer while the panel is hidden.
+    var notifications: Bool { didSet { save("notifications", notifications) } }
+    /// A dot on the menu bar icon for the same moments.
+    var menuBarBadge: Bool { didSet { save("menuBarBadge", menuBarBadge) } }
 
     @ObservationIgnored var onHotKeyChange: (() -> Void)?
 
@@ -23,6 +27,8 @@ final class Preferences {
         speakReplies = d.object(forKey: "speakReplies") as? Bool ?? true
         speechRate = d.object(forKey: "speechRate") as? Double ?? 0.52
         autoSendOnPause = d.object(forKey: "autoSendOnPause") as? Bool ?? true
+        notifications = d.object(forKey: "notifications") as? Bool ?? true
+        menuBarBadge = d.object(forKey: "menuBarBadge") as? Bool ?? true
     }
 
     private func save(_ key: String, _ value: Any) {

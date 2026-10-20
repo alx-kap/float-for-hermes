@@ -12,7 +12,7 @@ struct HermesQuickApp: App {
                 .environment(\.panelToggle, { delegate.panel.toggle() })
                 .environment(\.panelShow, { delegate.panel.show() })
         } label: {
-            Image(systemName: "bolt.horizontal.circle.fill")
+            MenuBarIcon(store: delegate.store)
         }
 
         Settings {
@@ -30,6 +30,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         registerHotKey()
+        store.isPanelVisible = { [weak self] in self?.panel.isVisible ?? true }
+        panel.onShow = { [weak self] in self?.store.panelDidShow() }
+        Notifier.shared.onOpen = { [weak self] in self?.panel.show() }
         Preferences.shared.onHotKeyChange = { [weak self] in self?.registerHotKey() }
         store.warmUp()
         // Opening the app by hand shows the panel; a login-item launch stays quiet in the menu bar.
@@ -113,5 +116,43 @@ struct MenuBarContent: View {
         case .failed(let m): m
         case .idle: "Idle"
         }
+    }
+}
+
+/// The menu bar icon, with a dot while a reply is unseen or Hermes is waiting on you.
+struct MenuBarIcon: View {
+    let store: ChatStore
+
+    var body: some View {
+        Image(nsImage: store.needsAttention ? Self.badged : Self.plain)
+            .accessibilityLabel(store.needsAttention ? "Hermes Quick, needs attention" : "Hermes Quick")
+    }
+
+    private static let plain = symbol()
+
+    /// The symbol with a dot in its top-right corner, cut out with a thin gap. Template, so it follows the menu bar.
+    private static let badged: NSImage = {
+        let base = symbol()
+        let image = NSImage(size: base.size, flipped: false) { rect in
+            base.draw(in: rect)
+            let d: CGFloat = 6.5
+            let dot = NSRect(x: rect.maxX - d, y: rect.maxY - d, width: d, height: d)
+            NSGraphicsContext.current?.compositingOperation = .clear
+            NSBezierPath(ovalIn: dot.insetBy(dx: -1.5, dy: -1.5)).fill()
+            NSGraphicsContext.current?.compositingOperation = .sourceOver
+            NSColor.black.setFill()
+            NSBezierPath(ovalIn: dot).fill()
+            return true
+        }
+        image.isTemplate = true
+        return image
+    }()
+
+    private static func symbol() -> NSImage {
+        let config = NSImage.SymbolConfiguration(pointSize: 15, weight: .regular)
+        let image = NSImage(systemSymbolName: "bolt.horizontal.circle.fill", accessibilityDescription: nil)!
+            .withSymbolConfiguration(config)!
+        image.isTemplate = true
+        return image
     }
 }
