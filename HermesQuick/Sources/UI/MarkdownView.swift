@@ -7,45 +7,65 @@ struct MarkdownView: View {
     let markdown: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ForEach(Array(Self.blocks(markdown).enumerated()), id: \.offset) { _, block in
-                switch block {
-                case .code(let lang, let code): CodeBlock(language: lang, code: code)
-                case .text(let t): textBlock(t)
-                case .table(let table): TableBlock(table: table)
-                case .quote(let callout, let body): QuoteBlock(callout: callout, markdown: body)
-                }
+        let elements = Self.elements(markdown)
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(elements.enumerated()), id: \.offset) { i, element in
+                elementView(element)
+                    .padding(.top, Self.spacing(after: i > 0 ? elements[i - 1] : nil, before: element) * scale)
             }
         }
         .textSelection(.enabled)
     }
 
-    private func textBlock(_ t: String) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            ForEach(Array(Self.paragraphs(t).enumerated()), id: \.offset) { _, line in
-                lineView(line)
-            }
+    private var scale: CGFloat { Preferences.shared.textScale }
+
+    @ViewBuilder
+    private func elementView(_ element: Element) -> some View {
+        switch element {
+        case .heading(let level, let text):
+            Text(Self.inline(text))
+                .font(.app(Self.headingSize(level), weight: level <= 2 ? .bold : .semibold))
+                .lineSpacing(2 * scale)
+                .fixedSize(horizontal: false, vertical: true)
+        case .paragraph(let text):
+            Text(Self.inline(text))
+                .font(.app(14))
+                .lineSpacing(4.5 * scale)
+                .fixedSize(horizontal: false, vertical: true)
+        case .list(let items):
+            ListBlock(items: items)
+        case .rule:
+            Divider()
+        case .block(.code(let lang, let code)):
+            CodeBlock(language: lang, code: code)
+        case .block(.table(let table)):
+            TableBlock(table: table)
+        case .block(.quote(let callout, let body)):
+            QuoteBlock(callout: callout, markdown: body)
+        case .block(.text(let t)):
+            Text(Self.inline(t)).font(.app(14))
         }
     }
 
-    @ViewBuilder
-    private func lineView(_ line: String) -> some View {
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        if let level = Self.headingLevel(trimmed) {
-            Text(Self.inline(String(trimmed.drop(while: { $0 == "#" }).drop(while: { $0 == " " }))))
-                .font(.app(level == 1 ? 18 : level == 2 ? 16 : 14.5, weight: .semibold))
-                .padding(.top, 4)
-        } else if let item = Self.bullet(trimmed) {
-            let indent = CGFloat(line.prefix(while: { $0 == " " }).count / 2) * 14
-            HStack(alignment: .firstTextBaseline, spacing: 7) {
-                Text(item.marker).foregroundStyle(.secondary).font(.app(14))
-                Text(Self.inline(item.text)).font(.app(14))
-            }
-            .padding(.leading, indent)
-        } else if trimmed == "---" || trimmed == "***" {
-            Divider().padding(.vertical, 2)
-        } else {
-            Text(Self.inline(line)).font(.app(14)).lineSpacing(2)
+    static func headingSize(_ level: Int) -> CGFloat {
+        switch level {
+        case 1: 19
+        case 2: 17
+        case 3: 15.5
+        default: 14
+        }
+    }
+
+    /// Space above `cur`, by what it follows: headings get room above and sit close to their content,
+    /// rules breathe on both sides, everything else is a paragraph break.
+    static func spacing(after prev: Element?, before cur: Element) -> CGFloat {
+        guard let prev else { return 0 }
+        switch (prev, cur) {
+        case (.heading, .heading): return 8
+        case (_, .heading(let level, _)): return level <= 2 ? 22 : 18
+        case (.heading, _): return 8
+        case (.rule, _), (_, .rule): return 16
+        default: return 12
         }
     }
 
@@ -53,6 +73,17 @@ struct MarkdownView: View {
 
     enum Block {
         case text(String), code(String, String), table(Table), quote(Callout?, String)
+    }
+
+    enum Element {
+        case heading(Int, String), paragraph(String), list([ListItem]), rule, block(Block)
+    }
+
+    struct ListItem {
+        var depth: Int
+        var marker: String
+        var text: String
+        var ordered: Bool { marker.last == "." }
     }
 
     struct Table {
@@ -204,17 +235,57 @@ struct MarkdownView: View {
         return out
     }
 
-    /// Split into display lines, merging soft-wrapped prose lines and dropping blank runs.
-    static func paragraphs(_ t: String) -> [String] {
-        var out: [String] = []
-        for raw in t.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
-            let s = raw.trimmingCharacters(in: .whitespaces)
-            if s.isEmpty { if out.last != "" { out.append("") }; continue }
-            out.append(raw)
+    /// Groups a text block's lines into headings, paragraphs, lists and rules.
+    /// Lines within a paragraph keep their breaks; a blank line ends it. Indented lines (or ones
+    /// directly under an item) continue the list item above them.
+    static func elements(_ md: String) -> [Element] {
+        var out: [Element] = []
+        for block in blocks(md) {
+            guard case .text(let t) = block else { out.append(.block(block)); continue }
+            var para: [String] = []
+            var items: [ListItem] = []
+            var levels: [Int] = []
+            var afterBlank = false
+            func flushPara() {
+                if !para.isEmpty { out.append(.paragraph(para.joined(separator: "\n"))) }
+                para.removeAll()
+            }
+            func flushList() {
+                if !items.isEmpty { out.append(.list(items)) }
+                items.removeAll()
+                levels.removeAll()
+            }
+            for raw in t.split(separator: "\n", omittingEmptySubsequences: false) {
+                let s = raw.trimmingCharacters(in: .whitespaces)
+                let indent = raw.prefix(while: { $0 == " " || $0 == "\t" }).reduce(0) { $0 + ($1 == "\t" ? 4 : 1) }
+                defer { afterBlank = s.isEmpty }
+                if s.isEmpty { flushPara(); continue }
+                if let level = headingLevel(s) {
+                    flushPara(); flushList()
+                    out.append(.heading(level, String(s.dropFirst(level)).trimmingCharacters(in: .whitespaces)))
+                } else if isRule(s) {
+                    flushPara(); flushList()
+                    out.append(.rule)
+                } else if let b = bullet(s) {
+                    flushPara()
+                    while let last = levels.last, indent < last { levels.removeLast() }
+                    if levels.last.map({ indent > $0 }) ?? true { levels.append(indent) }
+                    items.append(ListItem(depth: levels.count - 1, marker: b.marker, text: b.text))
+                } else if !items.isEmpty, indent > 0 || !afterBlank {
+                    items[items.count - 1].text += "\n" + s
+                } else {
+                    flushList()
+                    para.append(s)
+                }
+            }
+            flushPara(); flushList()
         }
-        while out.first == "" { out.removeFirst() }
-        while out.last == "" { out.removeLast() }
-        return out.filter { !$0.isEmpty }
+        return out
+    }
+
+    static func isRule(_ s: String) -> Bool {
+        let compact = s.filter { $0 != " " }
+        return compact.count >= 3 && ["-", "*", "_"].contains { c in compact.allSatisfy { String($0) == c } }
     }
 
     static func headingLevel(_ s: String) -> Int? {
@@ -225,9 +296,9 @@ struct MarkdownView: View {
 
     static func bullet(_ s: String) -> (marker: String, text: String)? {
         for m in ["- ", "* ", "+ "] where s.hasPrefix(m) {
-            var rest = String(s.dropFirst(2))
-            if rest.hasPrefix("[ ] ") { rest = "☐ " + rest.dropFirst(4) }
-            if rest.hasPrefix("[x] ") { rest = "☑︎ " + rest.dropFirst(4) }
+            let rest = String(s.dropFirst(2))
+            if rest.hasPrefix("[ ] ") { return ("☐", String(rest.dropFirst(4))) }
+            if rest.lowercased().hasPrefix("[x] ") { return ("☑︎", String(rest.dropFirst(4))) }
             return ("•", rest)
         }
         if let dot = s.firstIndex(of: "."), s[..<dot].allSatisfy(\.isNumber), !s[..<dot].isEmpty,
@@ -245,6 +316,39 @@ struct MarkdownView: View {
             a[run.range].backgroundColor = Color.primary.opacity(0.08)
         }
         return a
+    }
+}
+
+/// Items with hanging indents: wrapped lines align under the text, not the marker,
+/// and numbers right-align so 9. and 10. line up.
+struct ListBlock: View {
+    let items: [MarkdownView.ListItem]
+
+    private var scale: CGFloat { Preferences.shared.textScale }
+
+    var body: some View {
+        let numberWidth = CGFloat(items.filter(\.ordered).map(\.marker.count).max() ?? 0) * 8.5
+        VStack(alignment: .leading, spacing: 7 * scale) {
+            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                HStack(alignment: .firstTextBaseline, spacing: 7 * scale) {
+                    Text(marker(item))
+                        .font(.app(14, weight: item.ordered ? .medium : .bold))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                        .frame(width: max(item.ordered ? numberWidth : 0, 12) * scale, alignment: .trailing)
+                    Text(MarkdownView.inline(item.text))
+                        .font(.app(14))
+                        .lineSpacing(4.5 * scale)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.leading, CGFloat(item.depth) * 19 * scale)
+            }
+        }
+    }
+
+    private func marker(_ item: MarkdownView.ListItem) -> String {
+        guard item.marker == "•" else { return item.marker }
+        return ["•", "◦", "▪︎"][min(item.depth, 2)]
     }
 }
 
@@ -278,6 +382,7 @@ struct CodeBlock: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(SyntaxHighlighter.highlight(code, language: language))
                     .font(.app(12.5, design: .monospaced))
+                    .lineSpacing(3)
                     .padding(.horizontal, 12)
                     .padding(.bottom, 10)
                     .fixedSize()
@@ -337,7 +442,7 @@ struct QuoteBlock: View {
             Capsule()
                 .fill((callout?.color ?? .secondary).opacity(callout == nil ? 0.45 : 0.9))
                 .frame(width: 3)
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 if let callout {
                     Label(callout.title, systemImage: callout.symbol)
                         .font(.app(13, weight: .semibold))

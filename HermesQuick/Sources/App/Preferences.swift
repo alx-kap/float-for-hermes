@@ -19,9 +19,18 @@ final class Preferences {
     var menuBarBadge: Bool { didSet { save("menuBarBadge", menuBarBadge) } }
     /// Multiplier for chat text (messages, code, cards, composer). See `Font.app`.
     var textScale: Double { didSet { save("textScale", textScale) } }
+    /// How much the panel frosts and dims what's behind it: 0 is clear glass, 1 nearly solid.
+    var backgroundOpacity: Double { didSet { save("backgroundOpacity", backgroundOpacity) } }
+    /// The tint behind the panel: "auto" (the system window color) or an sRGB hex like "#101826".
+    var backgroundTint: String { didSet { save("backgroundTint", backgroundTint) } }
     /// The panel's card width and message-list height, set by dragging its edges.
     var panelWidth: Double { didSet { save("panelWidth", panelWidth) } }
     var listHeight: Double { didSet { save("listHeight", listHeight) } }
+
+    static let tintPresets: [(name: String, value: String)] = [
+        ("Automatic", "auto"), ("Black", "#000000"), ("Graphite", "#1C1C20"), ("Claude Gray", "#262624"), ("Midnight", "#0E1424"),
+        ("Ocean", "#0B1E2A"), ("Forest", "#0F1D17"), ("Plum", "#1D1424"), ("Espresso", "#1F1712"),
+    ]
 
     static let textScales: [Double] = [0.85, 1, 1.15, 1.3, 1.5, 1.75]
     static let defaultPanelWidth = 680.0
@@ -40,6 +49,8 @@ final class Preferences {
         notifications = d.object(forKey: "notifications") as? Bool ?? true
         menuBarBadge = d.object(forKey: "menuBarBadge") as? Bool ?? true
         textScale = d.object(forKey: "textScale") as? Double ?? 1
+        backgroundOpacity = d.object(forKey: "backgroundOpacity") as? Double ?? 0.45
+        backgroundTint = d.string(forKey: "backgroundTint") ?? "auto"
         panelWidth = d.object(forKey: "panelWidth") as? Double ?? Self.defaultPanelWidth
         listHeight = d.object(forKey: "listHeight") as? Double ?? Self.defaultListHeight
     }
@@ -75,4 +86,27 @@ extension Font {
     static func app(_ size: CGFloat, weight: Font.Weight? = nil, design: Font.Design? = nil) -> Font {
         .system(size: (size * Preferences.shared.textScale).rounded(), weight: weight, design: design)
     }
+}
+
+extension Color {
+    /// `#RRGGBB` in sRGB; nil for anything else (including "auto").
+    init?(hex: String) {
+        guard hex.hasPrefix("#"), hex.count == 7, let v = UInt32(hex.dropFirst(), radix: 16) else { return nil }
+        self.init(.sRGB, red: Double(v >> 16 & 0xFF) / 255, green: Double(v >> 8 & 0xFF) / 255, blue: Double(v & 0xFF) / 255)
+    }
+
+    var hex: String {
+        guard let c = NSColor(self).usingColorSpace(.sRGB) else { return "#000000" }
+        let v = [c.redComponent, c.greenComponent, c.blueComponent].map { Int(($0 * 255).rounded()).clamped(0, 255) }
+        return String(format: "#%02X%02X%02X", v[0], v[1], v[2])
+    }
+
+    /// The panel tint from a `backgroundTint` preference.
+    static func panelTint(_ value: String) -> Color {
+        Color(hex: value) ?? Color(nsColor: .windowBackgroundColor)
+    }
+}
+
+private extension Int {
+    func clamped(_ lo: Int, _ hi: Int) -> Int { Swift.min(hi, Swift.max(lo, self)) }
 }

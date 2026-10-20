@@ -85,6 +85,7 @@ struct QuickChatView: View {
                 }
             }
         }
+        .background { PanelBackdrop(opacity: prefs.backgroundOpacity, tint: .panelTint(prefs.backgroundTint)) }
         .background {
             if isDropTargeted {
                 RoundedRectangle(cornerRadius: 28, style: .continuous)
@@ -528,4 +529,33 @@ struct SignInView: View {
         store.auth.reload()
         if store.auth.isSignedIn { store.warmUp() } else { store.signIn() }
     }
+}
+
+/// Sits under the card's content, inside its glass: a behind-window blur that frosts the desktop,
+/// then a tint (by default the window color: dark in Dark Mode, light in Light Mode) so text reads clearly.
+struct PanelBackdrop: View {
+    let opacity: Double
+    let tint: Color
+
+    var body: some View {
+        ZStack {
+            BehindWindowBlur().opacity(min(1, opacity * 1.6))
+            tint.opacity(opacity * 0.75)
+        }
+        .allowsHitTesting(false)
+        .animation(.easeOut(duration: 0.2), value: opacity)
+        .animation(.easeOut(duration: 0.25), value: tint)
+    }
+}
+
+struct BehindWindowBlur: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let v = NSVisualEffectView()
+        v.material = .underWindowBackground
+        v.blendingMode = .behindWindow
+        v.state = .active  // the panel often isn't key; keep blurring anyway
+        return v
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
 }

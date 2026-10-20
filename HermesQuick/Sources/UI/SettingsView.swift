@@ -64,6 +64,30 @@ struct SettingsView: View {
                     }
                 }
                 .help("Also ⌘+ and ⌘− in the panel, and ⌘0 to reset")
+                LabeledContent("Background") {
+                    HStack(spacing: 8) {
+                        Text("Clear").font(.system(size: 11)).foregroundStyle(.secondary)
+                        Slider(value: $prefs.backgroundOpacity, in: 0...1)
+                            .frame(width: 160)
+                        Text("Solid").font(.system(size: 11)).foregroundStyle(.secondary)
+                    }
+                }
+                .help("How much the panel blurs and dims what's behind it")
+                LabeledContent("Tint") {
+                    HStack(spacing: 7) {
+                        ForEach(Preferences.tintPresets, id: \.value) { preset in
+                            TintSwatch(color: .panelTint(preset.value), selected: prefs.backgroundTint == preset.value) {
+                                prefs.backgroundTint = preset.value
+                            }
+                            .help(preset.name)
+                        }
+                        ColorPicker("Custom", selection: Binding(
+                            get: { .panelTint(prefs.backgroundTint) },
+                            set: { prefs.backgroundTint = $0.hex }), supportsOpacity: false)
+                            .labelsHidden()
+                            .help("Custom")
+                    }
+                }
                 Toggle("Launch at login", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, on in
                         do { on ? try SMAppService.mainApp.register() : try SMAppService.mainApp.unregister() }
@@ -137,5 +161,26 @@ struct SettingsView: View {
         case .failed, .needsSignIn: .red
         case .idle: .gray
         }
+    }
+}
+
+/// A round color chip like System Settings' accent picker; a ring marks the selection.
+private struct TintSwatch: View {
+    let color: Color
+    let selected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Circle()
+                .fill(color)
+                .overlay(Circle().strokeBorder(.primary.opacity(0.18)))
+                .frame(width: 16, height: 16)
+                .padding(2.5)
+                .overlay(Circle().strokeBorder(Color.accentColor, lineWidth: selected ? 2 : 0))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .animation(.snappy(duration: 0.15), value: selected)
     }
 }
