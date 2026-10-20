@@ -20,6 +20,7 @@ struct HermesQuickApp: App {
                 .environment(delegate.store)
         }
         .windowResizability(.contentSize)
+        .windowToolbarStyle(.unified)
     }
 }
 
