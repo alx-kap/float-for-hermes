@@ -399,6 +399,14 @@ private struct ModelsPane: View {
 
     var body: some View {
         PaneForm(pane: .models) {
+            Section {
+                HStack {
+                    Text("Only providers you've set up on the gateway are listed. Your picks are saved on this Mac.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Refresh") { Task { await store.refreshModels() } }
+                }
+            }
             let groups = Dictionary(grouping: store.models, by: \.providerName)
             if store.models.isEmpty {
                 Section {
@@ -418,14 +426,6 @@ private struct ModelsPane: View {
                 } footer: {
                     Text(picked ? "The rest are under More Models." : "None picked, so the menu shows the newest few.")
                         .font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            Section {
-                HStack {
-                    Text("Only providers you've set up on the gateway are listed. Your picks are saved on this Mac.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Refresh") { Task { await store.refreshModels() } }
                 }
             }
         }
