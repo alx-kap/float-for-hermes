@@ -30,10 +30,27 @@ Most of the time you don't want to open an app to talk to your agent. You want t
 ## Requirements
 
 - A Mac running **macOS 26 (Tahoe)** or later
-- **Xcode 26+** and [XcodeGen](https://github.com/yonaskolb/XcodeGen) to build it (`brew install xcodegen`)
+- **Xcode 26+** only if you build from source. The prebuilt download doesn't need it
 - A running **Hermes gateway** you can reach, such as the one the Hermes desktop app connects to. Over [Tailscale](https://tailscale.com) works great for reaching your agent from anywhere.
 
 ## Install
+
+### Option 1: Download the app (no Xcode needed)
+
+1. Download `Float.zip` from the [latest release](../../releases/latest) and unzip it.
+2. Drag **Float.app** into your Applications folder.
+3. Open it. The first time, macOS will say it can't verify the app, because Float isn't notarized by Apple (that needs a paid developer account, and this is a free open-source project). To allow it, **right-click Float.app › Open › Open**, or go to **System Settings › Privacy & Security** and click **Open Anyway**.
+
+Or do it all in Terminal:
+
+```bash
+curl -L -o /tmp/Float.zip https://github.com/<your-username>/float-for-hermes/releases/latest/download/Float.zip
+unzip -q -o /tmp/Float.zip -d ~/Applications
+xattr -dr com.apple.quarantine ~/Applications/Float.app
+open ~/Applications/Float.app
+```
+
+### Option 2: Build it yourself
 
 ```bash
 git clone https://github.com/<your-username>/float-for-hermes.git
@@ -41,7 +58,11 @@ cd float-for-hermes
 ./install.sh
 ```
 
-That builds a Release copy into `~/Applications/Float.app` and launches it. Run the script again any time to update.
+That builds a Release copy into `~/Applications/Float.app` and launches it. It checks for Xcode 26+ and installs [XcodeGen](https://github.com/yonaskolb/XcodeGen) through Homebrew if it's missing. Run it again any time to update. Because you built it yourself, macOS doesn't show the security warning.
+
+### Using an AI agent?
+
+Point it at this repo and say "install Float". [AGENTS.md](AGENTS.md) has exact, copy-pasteable steps.
 
 ## Getting started
 

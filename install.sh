@@ -2,6 +2,15 @@
 # Build Float and install it to ~/Applications. Pass --regular to show a Dock icon (for screenshots).
 set -e
 cd "$(dirname "$0")/Float"
+if ! xcodebuild -version >/dev/null 2>&1; then
+  echo "Float needs Xcode 26 or later to build. Install it from the App Store, open it once, then run this again." >&2
+  echo "(Prefer not to install Xcode? Download the prebuilt Float.zip from the Releases page instead.)" >&2
+  exit 1
+fi
+if ! command -v xcodegen >/dev/null 2>&1; then
+  command -v brew >/dev/null 2>&1 || { echo "Float needs XcodeGen to build. Install Homebrew (https://brew.sh), then run this again." >&2; exit 1; }
+  echo "Installing XcodeGen with Homebrew…"; brew install xcodegen
+fi
 # Build outside iCloud Drive: its extended attributes make codesign fail.
 BUILD=~/Library/Caches/Float/build
 xcodegen generate -q
