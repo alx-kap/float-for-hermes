@@ -42,6 +42,8 @@ final class ChatStore {
     var contextSlices: [ContextSlice] = []
     /// A send that hit a dropped connection; it goes out once the gateway is back.
     @ObservationIgnored private var queuedSend: QueuedSend?
+    /// Identifies the send currently getting to the gateway; clearing it abandons that attempt.
+    @ObservationIgnored private var deliveryToken: UUID?
     @ObservationIgnored private var queueTask: Task<Void, Never>?
 
     private struct QueuedSend {
@@ -648,13 +650,28 @@ final class ChatStore {
                              voiceTurn: voiceTurn, replacing: old, submitAttempted: false))
             return
         }
+        let token = UUID()
+        deliveryToken = token
+        var submitting = false
+        let attempt = QueuedSend(bubble: bubble, text: text, files: files, rawPrompt: rawPrompt,
+                                 voiceTurn: voiceTurn, replacing: old, submitAttempted: false)
+        // A dead connection can hang for the full connect timeout. If we're still not through
+        // by then, say so now and keep the message for when Hermes is back.
         Task {
-            var submitting = false
+            try? await Task.sleep(for: .seconds(1.5))
+            guard deliveryToken == token, !submitting, gateway.state != .connected else { return }
+            deliveryToken = nil
+            status = ""
+            queue(attempt)
+        }
+        Task {
             do {
                 let sid = try await ensureSession()
+                guard deliveryToken == token else { return }
                 if let old { try await undoLastTurn(ifItIs: old, sid: sid) }
                 var refs: [String] = []
                 for f in files {
+                    guard deliveryToken == token else { return }
                     if f.isImage {
                         try await gateway.call("image.attach_bytes", [
                             "session_id": sid, "content_base64": f.data.base64EncodedString(),
@@ -677,9 +694,11 @@ final class ChatStore {
                 }
                 var params: JSON = ["session_id": sid, "text": prompt]
                 if voiceTurn { params["voice_turn"] = true }
+                guard deliveryToken == token else { return }
                 submitting = true
                 try await gateway.call("prompt.submit", params)
             } catch {
+                guard deliveryToken == token else { return }
                 status = ""
                 if isConnectionLost(error) {
                     // Keep it and send it when the gateway is back, rather than failing.
@@ -750,6 +769,17 @@ final class ChatStore {
         }
         deliver(text: q.text, files: q.files, rawPrompt: q.rawPrompt, bubble: q.bubble,
                 voiceTurn: q.voiceTurn, replacing: q.replacing)
+    }
+
+    /// Stop a send that hasn't reached Hermes yet; the message stays with a Retry.
+    private func abandonDelivery() {
+        deliveryToken = nil
+        status = ""
+        isBusy = false
+        if let i = messages.lastIndex(where: { $0.role == .user }) {
+            withAnimation(.snappy) { messages[i].failed = true }
+        }
+        voice.turnEndedWithoutSpeech()
     }
 
     /// Stop waiting. From the Stop button the message stays with a Retry; switching chats just drops it.
@@ -883,6 +913,7 @@ final class ChatStore {
     func interrupt() {
         voice.stopSpeaking()
         if queuedSend != nil { return cancelQueuedSend(markFailed: true) }
+        if deliveryToken != nil, gateway.state != .connected { return abandonDelivery() }
         guard let sid = sessionId else { return }
         Task { try? await gateway.call("session.interrupt", ["session_id": sid]) }
     }
