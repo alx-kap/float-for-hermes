@@ -114,6 +114,13 @@ struct MessageRow: View {
     var isLatestReply = false
     var hasTail = true
     @State private var hovering = false
+    @State private var expanded = false
+
+    private static let collapsedLines = 6
+    /// A prompt this long is folded to a few lines until the user opens it.
+    private var isLongText: Bool {
+        message.text.count > 320 || message.text.split(separator: "\n", omittingEmptySubsequences: false).count > Self.collapsedLines + 1
+    }
 
     private var isEditing: Bool { store.editingMessageId == message.id }
 
@@ -202,7 +209,18 @@ struct MessageRow: View {
             if !message.text.isEmpty {
                 Text(message.text)
                     .font(.app(14))
+                    .lineLimit(isLongText && !expanded ? Self.collapsedLines : nil)
+                    .multilineTextAlignment(.leading)
                     .textSelection(.enabled)
+                if isLongText {
+                    Button(expanded ? "Show less" : "Show more") {
+                        withAnimation(.smooth(duration: 0.25)) { expanded.toggle() }
+                    }
+                    .buttonStyle(.plain)
+                    .font(.app(12, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .padding(.top, 2)
+                }
             }
         }
         .foregroundStyle(.white)
