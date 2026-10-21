@@ -1,5 +1,9 @@
 # Float for Hermes
 
+<p align="center">
+  <img src="docs/float-demo.gif" alt="Float for Hermes: press a hotkey, ask your Hermes agent a question from anywhere on your Mac, and watch it run tools and answer in a Liquid Glass panel" width="760">
+</p>
+
 **A native macOS quick-chat for your Hermes agent.** Press a hotkey, ask something, get an answer, and get back to what you were doing.
 
 Float is a small floating panel that lives in your menu bar and talks to your own Hermes gateway. Think Spotlight or Raycast, but the thing answering is your agent, with your tools, your memory and your models.
