@@ -105,7 +105,6 @@ Float/
   Sources/UI           SwiftUI views: glass panel, messages, Markdown, composer, settings
 ```
 
-See [ROADMAP.md](ROADMAP.md) for what's done and what's next.
 
 ## FAQ
 
