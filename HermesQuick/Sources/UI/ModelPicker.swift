@@ -4,7 +4,7 @@ import SwiftUI
 /// hard the model thinks and fast mode, then the rest of the catalog one click down.
 struct ModelPicker: View {
     @Environment(ChatStore.self) private var store
-    let chooseModels: () -> Void
+    let openSettings: () -> Void
     let dismiss: () -> Void
 
     @State private var showingMore = false
@@ -51,8 +51,8 @@ struct ModelPicker: View {
                 }
             }
             divider
-            PickerRow(action: { dismiss(); chooseModels() }) {
-                Text("Choose models…").foregroundStyle(.secondary)
+            PickerRow(action: { dismiss(); openSettings() }) {
+                Text("Settings…").foregroundStyle(.secondary)
                 Spacer()
             }
         }

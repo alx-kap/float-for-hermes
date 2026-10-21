@@ -200,8 +200,8 @@ struct HeaderBar: View {
                             .truncationMode(.middle)
                             .contentTransition(.numericText())
                             .popover(isPresented: $showingPicker, arrowEdge: .bottom) {
-                                ModelPicker(chooseModels: {
-                                    settingsPane = .models
+                                ModelPicker(openSettings: {
+                                    settingsPane = .general
                                     NSApp.activate()
                                     openSettings()
                                 }, dismiss: { showingPicker = false })

@@ -85,7 +85,7 @@ enum UIPreview {
             .environment(store)
             .environment(presentation)
             .frame(width: size.width, height: size.height)
-        let picker = ModelPicker(chooseModels: {}, dismiss: {}).environment(store).padding(8)
+        let picker = ModelPicker(openSettings: {}, dismiss: {}).environment(store).padding(8)
         let view = Group {
             if args.contains("-uiPreviewPicker") { AnyView(picker) } else { AnyView(panel) }
         }
