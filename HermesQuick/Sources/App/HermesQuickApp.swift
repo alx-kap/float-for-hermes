@@ -84,7 +84,10 @@ struct MenuBarContent: View {
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
-        Button("Open Hermes Quick  (\(Preferences.shared.hotKey.label))") { toggle() }
+        // The shortcut sits at the right like the other items' (the global hotkey does the real work).
+        let hotKey = Preferences.shared.hotKey
+        Button("Open Hermes Quick") { toggle() }
+            .keyboardShortcut(hotKey.menuKey, modifiers: hotKey.menuModifiers)
         Button("New Chat") { store.newChat(); show() }
         if store.auth.isSignedIn {
             Menu("Open Recent") {
@@ -117,7 +120,7 @@ struct MenuBarContent: View {
         case .connected: "Connected · \(Preferences.shared.baseURL?.host() ?? "")"
         case .connecting: "Connecting…"
         case .needsSignIn: "Sign-in required"
-        case .failed(let m): m
+        case .failed(let m): m.count > 40 ? String(m.prefix(40)) + "…" : m
         case .idle: "Idle"
         }
     }
@@ -158,5 +161,19 @@ struct MenuBarIcon: View {
             .withSymbolConfiguration(config)!
         image.isTemplate = true
         return image
+    }
+}
+
+private extension HotKeyPreset {
+    var menuKey: KeyEquivalent { self == .optionCommandH ? "h" : .space }
+
+    var menuModifiers: EventModifiers {
+        switch self {
+        case .optionSpace: .option
+        case .controlSpace: .control
+        case .controlOptionSpace: [.control, .option]
+        case .commandShiftSpace: [.command, .shift]
+        case .optionCommandH: [.option, .command]
+        }
     }
 }
