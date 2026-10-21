@@ -783,6 +783,11 @@ final class ChatStore {
         // The breakdown carries fresher context numbers than the last usage tick.
         if var u = usage ?? UsageInfo(["total": 0]) {
             if let used = (res["context_used"] as? NSNumber)?.intValue, used > 0 { u.contextUsed = used }
+            // The categories cover the fixed overhead; whatever else is in use is the conversation itself.
+            let counted = contextSlices.reduce(0) { $0 + $1.tokens }
+            if let used = u.contextUsed, used > counted, !contextSlices.isEmpty, !contextSlices.contains(where: { $0.id == "conversation" }) {
+                contextSlices.append(ContextSlice(id: "conversation", label: "Messages", tokens: used - counted))
+            }
             if let max = (res["context_max"] as? NSNumber)?.intValue, max > 0 { u.contextMax = max }
             if let pct = (res["context_percent"] as? NSNumber)?.intValue { u.contextPercent = pct }
             if let est = res["context_estimated"] as? Bool { u.contextEstimated = est }
