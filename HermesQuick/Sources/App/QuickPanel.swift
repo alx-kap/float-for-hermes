@@ -162,11 +162,12 @@ final class PanelController {
     /// How long a click-away waits before a compact panel hides, so a quick trip elsewhere doesn't lose it.
     private static let clickAwayGrace: TimeInterval = 0.05
 
-    /// Once there's a conversation, a draft, an attachment, or an open list or prompt, the panel stays
+    /// Once there's a conversation, a draft, an attachment, voice in use, or an open list or prompt, the panel stays
     /// put like a normal window; until then it's a launcher that goes away when you click elsewhere.
     private var isExpanded: Bool {
         !store.messages.isEmpty || !store.draft.isEmpty || !store.attachments.isEmpty
             || store.showingHistory || store.activePrompt != nil
+            || store.voice.phase != .idle || store.voice.isConversing
     }
 
     private var pasteMonitor: Any?
