@@ -48,7 +48,7 @@ Most of the time you don't want to open an app to talk to your agent. You want t
 Or do it all in Terminal:
 
 ```bash
-curl -L -o /tmp/Float.zip https://github.com/<your-username>/float-for-hermes/releases/latest/download/Float.zip
+curl -L -o /tmp/Float.zip https://github.com/alx-kap/float-for-hermes/releases/latest/download/Float.zip
 unzip -q -o /tmp/Float.zip -d ~/Applications
 xattr -dr com.apple.quarantine ~/Applications/Float.app
 open ~/Applications/Float.app
@@ -57,7 +57,7 @@ open ~/Applications/Float.app
 ### Option 2: Build it yourself
 
 ```bash
-git clone https://github.com/<your-username>/float-for-hermes.git
+git clone https://github.com/alx-kap/float-for-hermes.git
 cd float-for-hermes
 ./install.sh
 ```

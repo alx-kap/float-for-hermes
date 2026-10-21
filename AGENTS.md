@@ -8,7 +8,7 @@ Float is a native macOS menu bar app: a global-hotkey quick-chat panel for a Her
 
 ## Fastest: install the prebuilt app
 ```bash
-curl -L -o /tmp/Float.zip https://github.com/<your-username>/float-for-hermes/releases/latest/download/Float.zip
+curl -L -o /tmp/Float.zip https://github.com/alx-kap/float-for-hermes/releases/latest/download/Float.zip
 unzip -q -o /tmp/Float.zip -d ~/Applications
 xattr -dr com.apple.quarantine ~/Applications/Float.app
 open ~/Applications/Float.app
@@ -18,7 +18,7 @@ The app is ad-hoc signed, not notarized. Removing the quarantine flag as above a
 ## Or build from source
 Requires Xcode 26+ (`xcodebuild -version`). The script installs XcodeGen via Homebrew if needed.
 ```bash
-git clone https://github.com/<your-username>/float-for-hermes.git
+git clone https://github.com/alx-kap/float-for-hermes.git
 cd float-for-hermes
 ./install.sh
 ```
