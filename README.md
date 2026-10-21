@@ -24,7 +24,7 @@ Most of the time you don't want to open an app to talk to your agent. You want t
 - Chat with your Hermes agent, with streaming replies, tool steps shown inline, and Markdown that renders properly (tables, callouts, syntax-highlighted code).
 - Switch between Hermes **profiles** and **models** from the header.
 - Search, rename, archive and resume **past conversations** with ⌘K.
-- **Voice**: dictate a message (⌘D) or go hands-free (⇧⌘D). It listens, sends when you pause, speaks the reply, then listens again. Speech recognition runs on-device with Apple's `SpeechAnalyzer`.
+- **Voice that runs on your Mac.** Dictate a message (⌘D) or go hands-free (⇧⌘D): it listens, sends when you pause, speaks the reply, then listens again. Listening uses Apple's on-device speech models (`SpeechAnalyzer`), so your voice never leaves your Mac and there's no extra API or key. Replies are read in your Mac's system voice, so if you set a Siri voice under **System Settings › Accessibility › Read & Speak**, Float talks back in it.
 - **Attach** files and images by dragging them in, pasting, or ⌘O. Images and files that Hermes sends back show up inline, with save, open in Preview and copy.
 - Answer the agent when it **asks you something**: approvals for risky commands, clarifying questions, password and secret prompts.
 - **Retry, regenerate and edit** the latest message. Messages typed while you're offline wait and send when the connection returns.
@@ -118,7 +118,7 @@ No. Float is only a front end, so it needs a Hermes agent to talk to.
 You should, for the full experience. Float is the lightweight companion for quick questions from anywhere on your Mac.
 
 **Does my data go anywhere other than my gateway?**
-No. Float only connects to the gateway you point it at. Voice transcription happens on your Mac.
+No. Float only connects to the gateway you point it at. Voice is transcribed on your Mac by Apple's on-device speech models, and your audio is never sent anywhere.
 
 ## Contributing
 
