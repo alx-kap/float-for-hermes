@@ -57,6 +57,9 @@ struct ModelPicker: View {
             }
         }
         .font(.system(size: 13))
+        // Explicit, so the labels stay full strength when the popover's window isn't the active one
+        // (the default style dims there); the secondary text below still sits back.
+        .foregroundStyle(Color.primary)
         .padding(6)
         .frame(width: 300)
         .focusable()
