@@ -78,10 +78,10 @@ final class LoopbackServer {
     }
 
     private static let successPage = """
-    <!doctype html><html><head><meta charset="utf-8"><title>Hermes Quick</title>
+    <!doctype html><html><head><meta charset="utf-8"><title>Float</title>
     <style>body{font:16px -apple-system,system-ui;display:grid;place-items:center;height:100vh;margin:0;background:#0b0b0f;color:#eee}
     div{text-align:center}h1{font-weight:600;font-size:22px}p{opacity:.6}</style></head>
-    <body><div><h1>Signed in to Hermes</h1><p>You can close this tab and return to Hermes Quick.</p></div>
+    <body><div><h1>Signed in to Hermes</h1><p>You can close this tab and return to Float.</p></div>
     <script>setTimeout(()=>window.close(),1200)</script></body></html>
     """
 }

@@ -69,7 +69,7 @@ final class QuickPanel: NSPanel {
 /// The editor can't be replaced (SwiftUI casts it to its own class), so it gets a runtime subclass,
 /// the way KVO does it, whose drag methods forward attachment drags and leave the rest alone.
 enum FieldEditorDrops {
-    private static let prefix = "HermesQuickDrops_"
+    private static let prefix = "FloatDrops_"
     private static let imageTypes: [NSPasteboard.PasteboardType] =
         [.png, .tiff, NSPasteboard.PasteboardType("public.jpeg"), NSPasteboard.PasteboardType("public.heic")]
 

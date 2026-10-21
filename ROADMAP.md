@@ -1,4 +1,4 @@
-# Hermes Quick roadmap
+# Float roadmap
 
 Gaps found in a review on 2026-10-20, most important first. Tick items off as they land, and add notes on what was decided.
 The bar for every item: it should feel native, polished and intuitive (system idioms, keyboard-first, no dead ends), and be checked in the running app.
@@ -13,7 +13,7 @@ The bar for every item: it should feel native, polished and intuitive (system id
 
 ## Medium impact
 
-- [ ] **6. Send content in from other apps.** A hotkey that sends the selected text, a Services menu entry ("Ask Hermes"), App Intents for Shortcuts and Spotlight, a `hermesquick://` URL scheme, or "attach a screenshot of the current window".
+- [ ] **6. Send content in from other apps.** A hotkey that sends the selected text, a Services menu entry ("Ask Hermes"), App Intents for Shortcuts and Spotlight, a `float://` URL scheme, or "attach a screenshot of the current window".
 - [x] **7. Fuller Markdown.** Built 2026-10-20. `MarkdownView` now pulls GFM tables (column alignment, header shading, row stripes, cells wrap at ~280pt, wide tables scroll sideways) and multi-line block quotes out of text blocks; quotes render their contents as Markdown, and `> [!NOTE]`/`TIP`/`IMPORTANT`/`WARNING`/`CAUTION` become GitHub-style callouts. `UI/SyntaxHighlighter.swift` colours code blocks with a single regex pass (comments, strings, numbers, keywords, types, attributes, JSON/YAML keys, shell variables, tags) in Xcode's light/dark colours for about 15 languages; untagged blocks stay plain and results are cached so streaming stays cheap. Checked in the app by hand.
 - [x] **8. Queue messages typed while offline.** Built 2026-10-20. A send while the gateway is down (or one that loses the connection mid-way) stays in the chat as "Waiting for connection" with Cancel, and goes out once the gateway is back (retry with backoff up to 15s, plus right on reconnect). If `prompt.submit` was already on its way, `session.history` is checked first so it isn't sent twice. Stop/Cancel leaves it with Retry. Checked in the app by hand.
 - [x] **9. Usage display.** Built 2026-10-20, tokens and context only (no cost, by choice). A ring in the header shows context fill (orange from 75%, red from 90%), updated from `session.usage` ticks and `message.complete`. Clicking it opens a popover: a bar split by `session.context_breakdown` category with token counts, used/max (marked estimated when it is), compactions, and the chat's input/output/reasoning/total tokens, cache share and model calls. Checked in the app by hand.

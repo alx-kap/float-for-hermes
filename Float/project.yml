@@ -1,4 +1,4 @@
-name: HermesQuick
+name: Float
 options:
   bundleIdPrefix: com.alexk
   deploymentTarget:
@@ -14,7 +14,7 @@ settings:
     DEVELOPMENT_TEAM: ""
     ENABLE_HARDENED_RUNTIME: NO
 targets:
-  HermesQuick:
+  Float:
     type: application
     platform: macOS
     sources:
@@ -23,20 +23,21 @@ targets:
     info:
       path: Resources/Info.plist
       properties:
-        CFBundleDisplayName: Hermes Quick
-        CFBundleName: Hermes Quick
+        CFBundleDisplayName: Float
+        CFBundleName: Float
         CFBundleShortVersionString: "1.0"
         CFBundleVersion: "1"
         CFBundleIconFile: AppIcon
         LSUIElement: true
         LSApplicationCategoryType: public.app-category.productivity
-        NSMicrophoneUsageDescription: Hermes Quick listens so you can talk to your Hermes agent.
-        NSSpeechRecognitionUsageDescription: Hermes Quick transcribes your voice on-device to send to Hermes.
+        NSMicrophoneUsageDescription: Float listens so you can talk to your Hermes agent.
+        NSSpeechRecognitionUsageDescription: Float transcribes your voice on-device to send to Hermes.
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.alexk.hermesquick
-        PRODUCT_NAME: Hermes Quick
+        PRODUCT_BUNDLE_IDENTIFIER: com.alexk.float
+        PRODUCT_NAME: Float
+        PRODUCT_MODULE_NAME: FloatApp
         ENABLE_APP_SANDBOX: NO
         GENERATE_INFOPLIST_FILE: NO

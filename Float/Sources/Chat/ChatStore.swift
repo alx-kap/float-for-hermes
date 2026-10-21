@@ -1213,9 +1213,9 @@ final class ChatStore {
             }
             if isNew { announcePrompt(prompt) }
         } else if Self.windowRequests.contains(method) {
-            gateway.respondError(id: id, code: 4404, message: "Hermes Quick has no window for '\(method)'.")
+            gateway.respondError(id: id, code: 4404, message: "Float has no window for '\(method)'.")
         } else {
-            gateway.respondError(id: id, code: -32601, message: "Hermes Quick can't show '\(method)'.")
+            gateway.respondError(id: id, code: -32601, message: "Float can't show '\(method)'.")
         }
     }
 

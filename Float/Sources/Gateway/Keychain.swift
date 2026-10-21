@@ -3,7 +3,7 @@ import Security
 
 /// Minimal generic-password Keychain wrapper for the gateway token set.
 enum Keychain {
-    private static let service = "com.alexk.hermesquick"
+    private static let service = "com.alexk.float"
 
     static func set(_ data: Data, for account: String) {
         let base: [String: Any] = [

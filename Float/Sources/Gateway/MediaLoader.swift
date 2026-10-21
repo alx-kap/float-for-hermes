@@ -115,7 +115,7 @@ final class MediaLoader {
 
     private func saveTemp(_ ref: MediaRef) async throws -> URL {
         let data = try await data(for: ref)
-        let dir = FileManager.default.temporaryDirectory.appending(path: "HermesQuick", directoryHint: .isDirectory)
+        let dir = FileManager.default.temporaryDirectory.appending(path: "Float", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appending(path: ref.name.isEmpty ? "file" : ref.name)
         try data.write(to: url)

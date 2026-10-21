@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 @main
-struct HermesQuickApp: App {
+struct FloatApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     var body: some Scene {
@@ -86,7 +86,7 @@ struct MenuBarContent: View {
     var body: some View {
         // The shortcut sits at the right like the other items' (the global hotkey does the real work).
         let hotKey = Preferences.shared.hotKey
-        Button("Open Hermes Quick") { toggle() }
+        Button("Open Float") { toggle() }
             .keyboardShortcut(hotKey.menuKey, modifiers: hotKey.menuModifiers)
         Button("New Chat") { store.newChat(); show() }
         if store.auth.isSignedIn {
@@ -111,7 +111,7 @@ struct MenuBarContent: View {
         }
         .keyboardShortcut(",")
         Divider()
-        Button("Quit Hermes Quick") { NSApp.terminate(nil) }
+        Button("Quit Float") { NSApp.terminate(nil) }
             .keyboardShortcut("q")
     }
 
@@ -132,7 +132,7 @@ struct MenuBarIcon: View {
 
     var body: some View {
         Image(nsImage: store.needsAttention ? Self.badged : Self.plain)
-            .accessibilityLabel(store.needsAttention ? "Hermes Quick, needs attention" : "Hermes Quick")
+            .accessibilityLabel(store.needsAttention ? "Float, needs attention" : "Float")
     }
 
     private static let plain = symbol()

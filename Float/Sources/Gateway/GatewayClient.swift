@@ -218,7 +218,7 @@ final class GatewayClient {
                 onEvent?(type, sid, payload)
             } else if let id = obj["id"] as? String {
                 if let handler = onServerRequest { handler(id, method, params) }
-                else { respondError(id: id, code: -32601, message: "Not supported by Hermes Quick") }
+                else { respondError(id: id, code: -32601, message: "Not supported by Float") }
             }
             return
         }

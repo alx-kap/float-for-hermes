@@ -154,7 +154,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
     var subtitle: String {
         switch self {
         case .connection: "Your gateway, sign-in, and which bot you chat with."
-        case .general: "How you summon Hermes Quick, and when it starts."
+        case .general: "How you summon Float, and when it starts."
         case .models: "Pick the models the panel's menu puts first."
         case .appearance: "Text size and how the panel's glass looks over your desktop."
         case .notifications: "Get a heads-up when a reply lands while the panel is hidden."
@@ -330,7 +330,7 @@ private struct GeneralPane: View {
                         catch { launchAtLogin = !on }
                     }
             } footer: {
-                Text("Hermes Quick starts quietly in the menu bar.")
+                Text("Float starts quietly in the menu bar.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -449,7 +449,7 @@ private struct NotificationsPane: View {
                     LabeledContent {
                         Button("Open System Settings…") { notifier.openSystemSettings() }
                     } label: {
-                        Label("Notifications are turned off for Hermes Quick in System Settings.",
+                        Label("Notifications are turned off for Float in System Settings.",
                               systemImage: "exclamationmark.triangle.fill")
                             .foregroundStyle(.secondary)
                     }
@@ -496,7 +496,7 @@ private struct VoicePane: View {
             } header: {
                 Text("Replies")
             } footer: {
-                Text("Replies use your Mac's system voice. macOS only lets Apple's own speech tools use Siri voices, so Hermes Quick speaks through the system voice. Pick a Siri voice under Accessibility › Read & Speak › System voice.")
+                Text("Replies use your Mac's system voice. macOS only lets Apple's own speech tools use Siri voices, so Float speaks through the system voice. Pick a Siri voice under Accessibility › Read & Speak › System voice.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

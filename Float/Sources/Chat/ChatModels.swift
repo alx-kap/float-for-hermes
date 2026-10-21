@@ -206,7 +206,7 @@ struct GatewayPrompt: Identifiable, Equatable {
     let sessionId: String
     var kind: Kind
 
-    /// Nil for request kinds Hermes Quick can't show.
+    /// Nil for request kinds Float can't show.
     init?(id: String, method: String, params: JSON) {
         self.id = id
         self.method = method

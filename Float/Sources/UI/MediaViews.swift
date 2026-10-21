@@ -27,7 +27,7 @@ final class ImagePreview: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDele
     func begin(_ panel: QLPreviewPanel) {
         panel.dataSource = self
         panel.delegate = self
-        panel.level = NSWindow.Level(NSWindow.Level.floating.rawValue + 1)  // above the Hermes Quick panel
+        panel.level = NSWindow.Level(NSWindow.Level.floating.rawValue + 1)  // above the Float panel
     }
 
     func end(_ panel: QLPreviewPanel) {
