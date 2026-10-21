@@ -155,7 +155,19 @@ final class PanelController {
     let presentation = PanelPresentation()
     private var panel: QuickPanel!
     private var hideWork: DispatchWorkItem?
+    private var dismissWork: DispatchWorkItem?
+    private let store: ChatStore
     var onShow: (() -> Void)?
+
+    /// How long a click-away waits before a compact panel hides, so a quick trip elsewhere doesn't lose it.
+    private static let clickAwayGrace: TimeInterval = 0.05
+
+    /// Once there's a conversation, a draft, an attachment, or an open list or prompt, the panel stays
+    /// put like a normal window; until then it's a launcher that goes away when you click elsewhere.
+    private var isExpanded: Bool {
+        !store.messages.isEmpty || !store.draft.isEmpty || !store.attachments.isEmpty
+            || store.showingHistory || store.activePrompt != nil
+    }
 
     private var pasteMonitor: Any?
 
@@ -164,6 +176,7 @@ final class PanelController {
     #endif
 
     init(store: ChatStore) {
+        self.store = store
         let root = QuickChatView()
             .environment(store)
             .environment(presentation)
@@ -226,6 +239,14 @@ final class PanelController {
             store.addAttachments(items)
             return nil
         }
+        NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.scheduleClickAwayDismiss() }
+        }
+        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.dismissWork?.cancel() }
+        }
+        applyPlacement()
+        trackExpansion()
         NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification, object: panel, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, self.panel.isVisible else { return }
@@ -236,10 +257,49 @@ final class PanelController {
 
     var isVisible: Bool { panel.isVisible && presentation.isPresented }
 
-    func toggle() { isVisible ? hide() : show() }
+    /// The hotkey hides a panel you can see; from another desktop it brings an expanded panel here instead.
+    func toggle() { isVisible && panel.isOnActiveSpace ? hide() : show() }
+
+    /// Compact: a floating launcher that follows you across desktops. Expanded: a normal window that
+    /// stays on its desktop and is pulled to the current one when summoned.
+    private func applyPlacement() {
+        let expanded = isExpanded
+        panel.isFloatingPanel = !expanded
+        panel.level = expanded ? .normal : .floating
+        panel.collectionBehavior = expanded
+            ? [.moveToActiveSpace, .fullScreenAuxiliary, .transient]
+            : [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+    }
+
+    private func trackExpansion() {
+        withObservationTracking {
+            _ = isExpanded
+        } onChange: { [weak self] in
+            DispatchQueue.main.async {
+                self?.applyPlacement()
+                self?.trackExpansion()
+            }
+        }
+    }
+
+    /// Hides an unused compact panel after you click into another app. Screenshots, and our own dialogs
+    /// and previews (the app stays active for those), don't count as clicking away.
+    private func scheduleClickAwayDismiss() {
+        dismissWork?.cancel()
+        guard !isExpanded, isVisible else { return }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, !NSApp.isActive, !self.isExpanded, self.isVisible else { return }
+            if NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.apple.screencaptureui" { return }
+            self.hide()
+        }
+        dismissWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.clickAwayGrace, execute: work)
+    }
 
     func show() {
         hideWork?.cancel()
+        dismissWork?.cancel()
+        applyPlacement()
         if !panel.isVisible { position() }
         panel.alphaValue = 1
         panel.orderFrontRegardless()
