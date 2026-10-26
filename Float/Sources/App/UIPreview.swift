@@ -7,6 +7,7 @@ import SwiftUI
 ///   -uiPreview                     show the panel on a sample chat
 ///   -uiPreviewLongTitle            give the chat a long title
 ///   -uiPreviewWidth 520            panel width for this run (your saved width is put back)
+///   -uiPreviewCompact              show the compact bar, before a chat starts
 ///   -uiPreviewPicker               with -uiPreviewSnapshot, render the model picker instead
 ///   -uiPreviewSnapshot out.png     render the panel to a PNG and quit. Needs no Screen Recording
 ///                                  permission, but system glass and blur can't be captured in-process.
@@ -73,6 +74,7 @@ enum UIPreview {
                 ```
                 """, tools: [tool1, tool2]),
         ]
+        if args.contains("-uiPreviewCompact") { store.messages = [] }
     }
 
     /// Renders a fresh QuickChatView with SwiftUI's ImageRenderer (AppKit's in-process capture leaves the

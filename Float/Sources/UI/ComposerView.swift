@@ -86,6 +86,11 @@ struct ComposerView: View {
                 .padding(.vertical, 5)
                 .frame(maxWidth: .infinity, minHeight: rowHeight, alignment: .leading)
 
+                if !inPill && !store.currentModel.isEmpty {
+                    // Before a chat starts there's no header, so the model you'll start with sits here.
+                    ModelChip().frame(height: rowHeight)
+                        .transition(.scale(scale: 0.8, anchor: .trailing).combined(with: .opacity))
+                }
                 micButton.frame(height: rowHeight)
                 conversationButton.frame(height: rowHeight)
                 sendButton.frame(height: rowHeight)
@@ -110,6 +115,7 @@ struct ComposerView: View {
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: store.showSlash)
         .animation(.snappy, value: store.messages.isEmpty)
         .animation(.snappy, value: inPill)
+        .animation(.snappy, value: store.currentModel.isEmpty)
         .animation(.snappy, value: store.editingMessageId)
         .onChange(of: store.draft) { _, text in store.updateSlash(for: text) }
         .onChange(of: presentation.focusToken) { focused = true }
@@ -206,6 +212,58 @@ struct ComposerView: View {
         .allowsHitTesting(false)
     }
 
+}
+
+/// The compact bar's model: just its name, quiet until you point at it, opening the same picker as
+/// the header. ⌘⇧M opens it from the keyboard.
+private struct ModelChip: View {
+    @Environment(ChatStore.self) private var store
+    @Environment(\.openSettings) private var openSettings
+    @AppStorage("settingsPane") private var settingsPane: SettingsPane = .general
+    @State private var showingPicker = false
+    @State private var hovering = false
+
+    var body: some View {
+        Button { showingPicker.toggle() } label: {
+            HStack(spacing: 4) {
+                if store.fastMode {
+                    Image(systemName: "bolt.fill")
+                        .font(.app(10, weight: .semibold))
+                        .foregroundStyle(.orange)
+                        .transition(.scale.combined(with: .opacity))
+                }
+                Text(ModelChoice.displayName(store.currentModel))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .contentTransition(.numericText())
+                    .popover(isPresented: $showingPicker, arrowEdge: .bottom) {
+                        ModelPicker(openSettings: {
+                            settingsPane = .general
+                            NSApp.activate()
+                            openSettings()
+                        }, dismiss: { showingPicker = false })
+                        .environment(store)
+                    }
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.app(8.5, weight: .semibold))
+                    .opacity(hovering || showingPicker ? 1 : 0.6)
+            }
+            .font(.app(12.5, weight: .medium))
+            .foregroundStyle(hovering || showingPicker ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+            .padding(.horizontal, 10)
+            .frame(height: 26)
+            .frame(maxWidth: 150)
+            .background(Capsule().fill(.primary.opacity(hovering || showingPicker ? 0.08 : 0.04)))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .onHover { h in withAnimation(.easeOut(duration: 0.12)) { hovering = h } }
+        .keyboardShortcut("m", modifiers: [.command, .shift])
+        .help("Start this chat with \(ModelChoice.displayName(store.currentModel)) (⇧⌘M)")
+        .animation(.snappy, value: store.currentModel)
+        .animation(.snappy, value: store.fastMode)
+    }
 }
 
 /// Slash-command suggestions under the input. ↑↓ choose, ↩ run, ⇥ insert, esc close.
