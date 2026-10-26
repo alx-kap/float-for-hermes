@@ -6,6 +6,12 @@
 
 **A native macOS quick-chat for your Hermes agent.** Press a hotkey, ask something, get an answer, and get back to what you were doing.
 
+**[alx-kap.github.io/float-for-hermes](https://alx-kap.github.io/float-for-hermes/)** · Install it with one line in Terminal:
+
+```bash
+curl -fsSL https://alx-kap.github.io/float-for-hermes/install.sh | bash
+```
+
 Float is a small floating panel that lives in your menu bar and talks to your own Hermes gateway. Think Spotlight or Raycast, but the thing answering is your agent, with your tools, your memory and your models.
 
 It is not a replacement for the Hermes desktop app. When you want the full workspace, use that. Float is for the other 90% of the time: the quick question, the one-off task, the "hey, can you just…" that shouldn't require switching apps and finding the right window.
