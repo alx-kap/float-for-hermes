@@ -29,6 +29,8 @@ final class VoiceEngine {
     @ObservationIgnored private var volatile = ""
     @ObservationIgnored private var lastSpeechAt = Date()
     @ObservationIgnored private let speaker = SystemVoiceSpeaker()
+    @ObservationIgnored private let warmer = OutputWarmer()
+    @ObservationIgnored private var speakTask: Task<Void, Never>?
 
     init() {
         speaker.onFinish = { [weak self] in self?.didFinishSpeaking() }
@@ -67,11 +69,20 @@ final class VoiceEngine {
         let text = Self.speakable(markdown)
         guard !text.isEmpty else { didFinishSpeaking(); return }
         phase = .speaking
-        speaker.speak(text, wordsPerMinute: Int(prefs.speechRate * 360))
+        // Give the headphones a moment to wake before the first word, or it gets lost.
+        let wait = warmer.start()
+        speakTask?.cancel()
+        speakTask = Task {
+            if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
+            guard !Task.isCancelled, phase == .speaking else { return }
+            speaker.speak(text, wordsPerMinute: Int(prefs.speechRate * 360))
+        }
     }
 
     func stopSpeaking() {
+        speakTask?.cancel()
         speaker.stop()
+        warmer.stop()
         if phase == .speaking { phase = .idle }
     }
 
@@ -197,6 +208,7 @@ final class VoiceEngine {
         let text = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         phase = (send && !text.isEmpty) ? .waiting : .idle
         if send, !text.isEmpty {
+            warmer.start()  // wakes the headphones while Hermes thinks
             onUtterance?(text)
         } else if isConversing, send {
             Task { await startListening() }
@@ -206,12 +218,14 @@ final class VoiceEngine {
     private func didFinishSpeaking() {
         guard phase == .speaking else { return }
         phase = .idle
+        warmer.stop()
         if isConversing { Task { await startListening() } }
     }
 
     /// The agent answered without voice (e.g. an error); resume the loop.
     func turnEndedWithoutSpeech() {
         if phase == .waiting { phase = .idle }
+        warmer.stop()
         if isConversing { Task { await startListening() } }
     }
 
@@ -223,18 +237,40 @@ final class VoiceEngine {
         if engine.isRunning { engine.stop() }
     }
 
-    // MARK: Voices
+    #if DEBUG
+    /// For `-uiPreviewVoice`: show the stage in a state without a microphone or a reply.
+    func preview(_ state: String) {
+        isConversing = true
+        switch state {
+        case "speaking":
+            phase = .speaking
+        case "listening":
+            transcript = "Why did the nightly backup fail"
+            level = 0.3
+            phase = .listening
+        default:
+            phase = .waiting
+        }
+    }
+    #endif
+
+    // MARK: Reading replies
 
     /// Strip markdown so the synthesizer doesn't read punctuation aloud.
     static func speakable(_ md: String) -> String {
         var s = md
-        s = s.replacingOccurrences(of: "```[\\s\\S]*?```", with: " (code omitted) ", options: .regularExpression)
+        s = s.replacingOccurrences(of: "```[\\s\\S]*?```", with: "\n\nCode block skipped.\n\n", options: .regularExpression)
+        s = s.replacingOccurrences(of: "(?m)(^[ \\t]*\\|.*\\|[ \\t]*(\\n|$))+", with: "\n\nTable skipped.\n\n", options: .regularExpression)
+        s = s.replacingOccurrences(of: "(?m)^[ \\t]*([-*_])([ \\t]*\\1){2,}[ \\t]*$", with: "", options: .regularExpression)
+        s = s.replacingOccurrences(of: "(?m)^[ \\t]*(>[ \\t]?)+", with: "", options: .regularExpression)
+        s = s.replacingOccurrences(of: "\\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\\]", with: "", options: [.regularExpression, .caseInsensitive])
         s = s.replacingOccurrences(of: "`([^`]*)`", with: "$1", options: .regularExpression)
         s = s.replacingOccurrences(of: "!?\\[([^\\]]*)\\]\\([^)]*\\)", with: "$1", options: .regularExpression)
         s = s.replacingOccurrences(of: "(?m)^#{1,6}\\s*", with: "", options: .regularExpression)
         s = s.replacingOccurrences(of: "(?m)^\\s*[-*+]\\s+", with: "", options: .regularExpression)
         s = s.replacingOccurrences(of: "[*_~]{1,3}", with: "", options: .regularExpression)
         s = s.replacingOccurrences(of: "https?://\\S+", with: "link", options: .regularExpression)
+        s = s.replacingOccurrences(of: "\\n{3,}", with: "\n\n", options: .regularExpression)
         return s.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
@@ -290,6 +326,7 @@ nonisolated final class AudioTap: @unchecked Sendable {
     }
 }
 
+
 /// Speaks with the macOS *system voice* via /usr/bin/say.
 ///
 /// macOS hides Siri voices from third-party apps' `AVSpeechSynthesizer` / `NSSpeechSynthesizer`
@@ -331,5 +368,49 @@ final class SystemVoiceSpeaker {
         guard let p = process else { return }
         process = nil
         if p.isRunning { p.terminate() }
+    }
+}
+
+/// Bluetooth headphones like AirPods drop the start of a sound while their audio link wakes from
+/// idle, or switches back from microphone mode after listening. Playing near-silence from the
+/// moment you stop talking until Hermes has spoken keeps the link up, so no words are lost.
+final class OutputWarmer {
+    /// How long the link should be awake before speech starts.
+    private static let wakeTime = 1.0
+    private let engine = AVAudioEngine()
+    private let player = AVAudioPlayerNode()
+    private let hush: AVAudioPCMBuffer?
+    private var since: Date?
+
+    init() {
+        let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1)!
+        engine.attach(player)
+        engine.connect(player, to: engine.mainMixerNode, format: format)
+        // Faint noise rather than zeros, which some headphones treat as nothing playing.
+        hush = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 22_050)
+        if let hush, let data = hush.floatChannelData?[0] {
+            hush.frameLength = hush.frameCapacity
+            for i in 0..<Int(hush.frameLength) { data[i] = Float.random(in: -1...1) * 1e-5 }
+        }
+    }
+
+    /// Starts playing if it isn't already. Returns how much longer to wait before speaking.
+    @discardableResult
+    func start() -> Double {
+        if since == nil, let hush {
+            do { try engine.start() } catch { return 0 }
+            player.scheduleBuffer(hush, at: nil, options: .loops)
+            player.play()
+            since = Date()
+        }
+        guard let since else { return 0 }
+        return max(0, Self.wakeTime - Date().timeIntervalSince(since))
+    }
+
+    func stop() {
+        guard since != nil else { return }
+        since = nil
+        player.stop()
+        engine.stop()
     }
 }
