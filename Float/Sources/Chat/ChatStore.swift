@@ -618,11 +618,11 @@ final class ChatStore {
 
     private func sendVoice(_ text: String) {
         guard !text.isEmpty, !isBusy else { return }
-        submit(text: text, files: attachments, voiceTurn: true)
+        submit(text: text, files: attachments, voiceTurn: true, id: voice.draftID)
         withAnimation { attachments.removeAll() }
     }
 
-    func submit(text: String, files: [Attachment], voiceTurn: Bool, showBubble: Bool = true) {
+    func submit(text: String, files: [Attachment], voiceTurn: Bool, showBubble: Bool = true, id: UUID? = nil) {
         lastError = nil
         var bubble: UUID?
         withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) {
@@ -630,6 +630,7 @@ final class ChatStore {
                 var msg = ChatMessage(role: .user, text: text, attachments: files.filter { !$0.isImage }.map(\.name),
                                       images: files.compactMap(\.thumbnail))
                 msg.files = files
+                if let id { msg.id = id }
                 bubble = msg.id
                 messages.append(msg)
             }

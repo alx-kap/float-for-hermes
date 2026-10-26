@@ -15,6 +15,12 @@ final class VoiceEngine {
     /// Continuous hands-free mode: listen → send → speak reply → listen again.
     private(set) var isConversing = false
     private(set) var lastTurnWasVoice = false
+    /// Voice mode with the microphone off: Hermes still answers aloud, but nothing listens.
+    private(set) var isMuted = false
+    /// Voice mode is showing the chat, with the orb docked above the bar.
+    var showsChat = false
+    /// The id the message being spoken will have once it's sent (see `ChatMessage.isDraft`).
+    private(set) var draftID = UUID()
     var errorMessage: String?
 
     @ObservationIgnored var onUtterance: ((String) -> Void)?
@@ -52,16 +58,45 @@ final class VoiceEngine {
 
     func startConversation() {
         isConversing = true
+        isMuted = false
+        showsChat = false
         lastTurnWasVoice = true
         stopSpeaking()
-        Task { await startListening() }
+        // The chime first: opening the mic switches Bluetooth headphones into headset mode,
+        // which would clip it.
+        VoiceChime.playEnter()
+        Task {
+            try? await Task.sleep(for: .milliseconds(450))
+            guard isConversing else { return }
+            await startListening()
+        }
     }
 
     func stopConversation() {
+        guard isConversing else { return }
         isConversing = false
+        isMuted = false
         stopSpeaking()
-        Task { await finishListening(send: false) }
+        VoiceChime.playExit()
+        let wasListening = isListening
+        silenceTask?.cancel()
         phase = .idle
+        guard wasListening else { return }
+        // Close the mic once the chime has played (closing it switches headphones out of headset mode).
+        Task {
+            try? await Task.sleep(for: .milliseconds(450))
+            if !isListening { await stopInput() }
+        }
+    }
+
+    /// Mute or unmute the microphone in voice mode. Muting drops what was being said.
+    func toggleMute() {
+        isMuted.toggle()
+        if isMuted {
+            if isListening { Task { await finishListening(send: false) } }
+        } else if isConversing, phase == .idle {
+            Task { await startListening() }
+        }
     }
 
     /// The reply arrived (or the turn ended); speak it.
@@ -97,7 +132,8 @@ final class VoiceEngine {
     // MARK: Listening
 
     private func startListening() async {
-        guard !isListening else { return }
+        guard !isListening, !(isConversing && isMuted) else { return }
+        let wasConversingAtStart = isConversing
         errorMessage = nil
         phase = .preparing
         transcript = ""
@@ -153,6 +189,9 @@ final class VoiceEngine {
             lastSpeechAt = Date()
             phase = .listening
             startSilenceWatch()
+            // Muted, or voice mode closed, while the mic was starting.
+            if isMuted && isConversing { await finishListening(send: false) }
+            else if !isConversing && wasConversingAtStart { await finishListening(send: false) }
         } catch {
             fail(error.localizedDescription)
         }
@@ -192,6 +231,21 @@ final class VoiceEngine {
 
     private func finishListening(send: Bool) async {
         guard isListening else { return }
+        await stopInput()
+
+        let text = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        phase = (send && !text.isEmpty) ? .waiting : .idle
+        if send, !text.isEmpty {
+            warmer.start()  // wakes the headphones while Hermes thinks
+            onUtterance?(text)
+            draftID = UUID()
+        } else if isConversing, send {
+            Task { await startListening() }
+        }
+    }
+
+    /// Closes the microphone and the transcriber.
+    private func stopInput() async {
         silenceTask?.cancel()
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
@@ -204,15 +258,6 @@ final class VoiceEngine {
         resultsTask = nil
         analyzer = nil
         level = 0
-
-        let text = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-        phase = (send && !text.isEmpty) ? .waiting : .idle
-        if send, !text.isEmpty {
-            warmer.start()  // wakes the headphones while Hermes thinks
-            onUtterance?(text)
-        } else if isConversing, send {
-            Task { await startListening() }
-        }
     }
 
     private func didFinishSpeaking() {
@@ -248,6 +293,14 @@ final class VoiceEngine {
             transcript = "Why did the nightly backup fail"
             level = 0.3
             phase = .listening
+        case "draft":
+            showsChat = true
+            transcript = "And how much space would pruning free up"
+            level = 0.3
+            phase = .listening
+        case "docked":
+            showsChat = true
+            phase = .speaking
         default:
             phase = .waiting
         }

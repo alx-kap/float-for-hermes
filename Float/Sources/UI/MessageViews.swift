@@ -5,6 +5,8 @@ struct MessageList: View {
     @State private var position = ScrollPosition(edge: .bottom)
     /// Scrolled far enough up that the latest message is out of view.
     @State private var awayFromBottom = false
+    /// Room kept clear under the latest message, for voice mode's docked orb.
+    var bottomInset: CGFloat = 0
 
     var body: some View {
         if UIPreview.isFlat {
@@ -12,6 +14,7 @@ struct MessageList: View {
             rows.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).clipped()
         } else {
             ScrollView { rows }
+                .contentMargins(.bottom, bottomInset, for: .scrollContent)
                 .scrollPosition($position)
                 .defaultScrollAnchor(.bottom, for: .sizeChanges)
                 .defaultScrollAnchor(.bottom, for: .initialOffset)
@@ -30,7 +33,7 @@ struct MessageList: View {
                         ScrollToBottomButton {
                             withAnimation(.smooth(duration: 0.45)) { position.scrollTo(edge: .bottom) }
                         }
-                        .padding(.bottom, 14)
+                        .padding(.bottom, 14 + bottomInset)
                         .transition(.scale(scale: 0.6).combined(with: .opacity).combined(with: .offset(y: 8)))
                     }
                 }
@@ -43,10 +46,20 @@ struct MessageList: View {
         msg.role == .user ? 30 : 22
     }
 
+    /// In voice mode, what you're saying shows as your next message while you say it.
+    private var voiceDraft: [ChatMessage] {
+        let voice = store.voice
+        guard voice.isConversing, voice.phase == .listening, !voice.isMuted else { return [] }
+        var draft = ChatMessage(role: .user, text: voice.transcript)
+        draft.id = voice.draftID
+        draft.isDraft = true
+        return [draft]
+    }
+
     private var rows: some View {
             LazyVStack(alignment: .leading, spacing: 0) {
                 // Only the latest exchange can be edited, retried or regenerated (session.undo drops the last turn).
-                let messages = store.messages
+                let messages = store.messages + voiceDraft
                 let lastUser = messages.lastIndex { $0.role == .user }
                 let lastReply = messages.lastIndex { $0.role == .assistant }.flatMap { $0 > (lastUser ?? -1) ? $0 : nil }
                 ForEach(Array(messages.enumerated()), id: \.element.id) { i, msg in
@@ -137,7 +150,7 @@ struct MessageRow: View {
         VStack(alignment: .trailing, spacing: 5) {
             HStack(alignment: .center, spacing: 6) {
                 Spacer(minLength: 80)
-                if isLatestUser && store.canEdit && !message.failed {
+                if isLatestUser && store.canEdit && !message.failed && !message.isDraft {
                     MessageAction(symbol: "pencil", help: "Edit") { store.beginEdit() }
                         .opacity(hovering ? 1 : 0)
                 }
@@ -206,12 +219,17 @@ struct MessageRow: View {
                     }
                 }
             }
-            if !message.text.isEmpty {
+            if message.isDraft && message.text.isEmpty {
+                ListeningDots()
+                    .frame(height: 18)
+                    .transition(.opacity)
+            } else if !message.text.isEmpty {
                 Text(message.text)
                     .font(.app(14))
                     .lineLimit(isLongText && !expanded ? Self.collapsedLines : nil)
                     .multilineTextAlignment(.leading)
                     .textSelection(.enabled)
+                    .contentTransition(.opacity)
                 if isLongText {
                     Button(expanded ? "Show less" : "Show more") {
                         withAnimation(.smooth(duration: 0.25)) { expanded.toggle() }
@@ -223,13 +241,19 @@ struct MessageRow: View {
                 }
             }
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(message.isDraft ? Color.primary : .white)
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
-        .background(
-            LinearGradient(colors: [Color.accentColor, Color.accentColor.opacity(0.82)],
-                           startPoint: .top, endPoint: .bottom),
-            in: BubbleShape(tail: hasTail))
+        .background {
+            // A draft is a pale bubble that turns blue, in place, once it's sent.
+            BubbleShape(tail: hasTail).fill(.primary.opacity(0.08))
+            BubbleShape(tail: hasTail)
+                .fill(LinearGradient(colors: [Color.accentColor, Color.accentColor.opacity(0.82)],
+                                     startPoint: .top, endPoint: .bottom))
+                .opacity(message.isDraft ? 0 : 1)
+        }
+        .overlay { if message.isDraft { ListeningOutline(shape: BubbleShape(tail: hasTail)).transition(.opacity) } }
+        .animation(.easeOut(duration: 0.2), value: message.text)
         .padding(.trailing, 5)  // room for the tail, kept for every bubble so a run lines up
         .opacity(isEditing ? 0.45 : 1)
     }
@@ -489,5 +513,36 @@ struct CommandOutputCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background((isError ? Color.red : Color.primary).opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.primary.opacity(0.06)))
+    }
+}
+
+/// Breathes around a voice draft while the mic is still taking it in.
+private struct ListeningOutline<S: Shape>: View {
+    let shape: S
+
+    var body: some View {
+        shape.stroke(Color.accentColor, lineWidth: 1.5)
+            .phaseAnimator([0.25, 0.75]) { content, glow in
+                content.opacity(glow)
+            } animation: { _ in .easeInOut(duration: 0.9) }
+    }
+}
+
+/// Three dots rising in turn: listening, nothing heard yet.
+private struct ListeningDots: View {
+    var body: some View {
+        TimelineView(.animation) { ctx in
+            let t = ctx.date.timeIntervalSinceReferenceDate
+            HStack(spacing: 4) {
+                ForEach(0..<3) { i in
+                    let wave = (sin(t * 5 - Double(i) * 0.9) + 1) / 2
+                    Circle()
+                        .frame(width: 6, height: 6)
+                        .opacity(0.3 + 0.6 * wave)
+                        .offset(y: -2 * wave)
+                }
+            }
+            .foregroundStyle(.secondary)
+        }
     }
 }

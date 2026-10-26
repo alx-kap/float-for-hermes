@@ -33,6 +33,7 @@ struct QuickChatView: View {
         .padding(.bottom, 24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .animation(.spring(response: 0.42, dampingFraction: 0.84), value: hasConversation)
+        .animation(.spring(response: 0.45, dampingFraction: 0.86), value: store.voice.isConversing)
         .animation(.snappy, value: store.lastError)
         .onChange(of: store.showingHistory) { _, showing in
             if !showing { presentation.focusToken += 1 }
@@ -58,8 +59,8 @@ struct QuickChatView: View {
                             .transition(.handoff)
                     } else if store.voice.isConversing {
                         VoiceStage()
-                            .frame(height: 300)
-                            .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                            .frame(height: listHeight)
+                            .transition(.voiceStage)
                     } else if store.isOpeningSession && store.messages.isEmpty {
                         ProgressView()
                             .controlSize(.small)
@@ -99,7 +100,7 @@ struct QuickChatView: View {
         .panelGlass(RoundedRectangle(cornerRadius: 28, style: .continuous), id: "card", in: glass)
         .shadow(color: .black.opacity(0.28), radius: 30, y: 16)
         // Grab strips straddle the card's edge (half outside, in the window's transparent margin).
-        .overlay { if store.auth.isSignedIn { ResizeHandles(vertical: hasConversation && !store.voice.isConversing).padding(-ResizeHandles.overhang) } }
+        .overlay { if store.auth.isSignedIn { ResizeHandles(vertical: hasConversation).padding(-ResizeHandles.overhang) } }
         .onDrop(of: [.fileURL, .image], isTargeted: $isDropTargeted.animation(.snappy)) { providers in
             loadDrop(providers)
             return true
@@ -152,6 +153,13 @@ private extension View {
 extension AnyTransition {
     /// Swap two views that share a spot: the old one fades out first, then the new one fades in,
     /// so their contents never show through each other.
+    /// Voice mode comes in once the chat has faded, and leaves quickly so the chat can return.
+    static var voiceStage: AnyTransition {
+        .asymmetric(
+            insertion: .opacity.combined(with: .scale(scale: 0.97)).animation(.easeOut(duration: 0.35).delay(0.08)),
+            removal: .opacity.combined(with: .scale(scale: 0.97)).animation(.easeIn(duration: 0.18)))
+    }
+
     static var handoff: AnyTransition {
         .asymmetric(
             insertion: .opacity.combined(with: .scale(scale: 0.985, anchor: .top))

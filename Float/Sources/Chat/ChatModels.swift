@@ -118,7 +118,7 @@ struct Attachment: Identifiable, Equatable {
 struct ChatMessage: Identifiable, Equatable {
     enum Role { case user, assistant, notice, error }
 
-    let id = UUID()
+    var id = UUID()
     var role: Role
     var text: String
     var reasoning = ""
@@ -135,6 +135,9 @@ struct ChatMessage: Identifiable, Equatable {
     var failed = false
     /// A user message waiting for the connection to come back.
     var queued = false
+    /// Voice mode's message while you're still saying it. Sending keeps its id, so the bubble
+    /// stays put and just turns into a sent message.
+    var isDraft = false
 }
 
 /// Token counters and context-window fill from `session.usage` / `message.complete`.

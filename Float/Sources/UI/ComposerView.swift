@@ -5,6 +5,7 @@ struct ComposerView: View {
     @Environment(ChatStore.self) private var store
     @Environment(PanelPresentation.self) private var presentation
     @FocusState private var focused: Bool
+    @Namespace private var morph
 
     var body: some View {
         @Bindable var store = store
@@ -47,7 +48,50 @@ struct ComposerView: View {
             // Every control is centred in a row one text line tall (it grows with the text size), so a
             // one-line draft lines up with the buttons; a longer draft grows upward and the buttons
             // stay with its last line.
-            HStack(alignment: .bottom, spacing: 8) {
+            ZStack {
+                if voice.isConversing {
+                    VoiceBar(rowHeight: rowHeight, morph: morph)
+                        .transition(.blurReplace)
+                } else {
+                    inputRow.transition(.blurReplace)
+                }
+            }
+            // Under a conversation the input is its own glass pill, raised off the messages. With no
+            // conversation the card itself is the input bar, so it stays flat.
+            .padding(.horizontal, inPill ? 6 : 0)
+            .padding(.vertical, inPill ? 5 : 0)
+            .modifier(PillGlass(isOn: inPill))
+
+            if store.showSlash {
+                SlashMenu()
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .padding(.horizontal, inPill ? 12 : 14)
+        .padding(.top, inPill ? 4 : 12)
+        .padding(.bottom, 12)
+        .background(WindowDragArea())
+        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: voice.isListening)
+        .animation(.spring(response: 0.45, dampingFraction: 0.82), value: voice.isConversing)
+        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: store.attachments.count)
+        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: store.showSlash)
+        .animation(.snappy, value: store.messages.isEmpty)
+        .animation(.snappy, value: inPill)
+        .animation(.snappy, value: store.currentModel.isEmpty)
+        .animation(.snappy, value: store.editingMessageId)
+        .onChange(of: store.draft) { _, text in store.updateSlash(for: text) }
+        .onChange(of: presentation.focusToken) { focused = true }
+        .onChange(of: voice.isConversing) { _, on in if !on { focused = true } }
+        .onAppear { focused = true }
+        .onChange(of: focused, initial: true) { _, f in store.composerFocused = f }
+        .background(shortcuts)
+    }
+
+    /// The text field and its buttons. In voice mode the pill swaps this for `VoiceBar`.
+    private var inputRow: some View {
+        @Bindable var store = store
+        let voice = store.voice
+        return HStack(alignment: .bottom, spacing: 8) {
                 IconButton(symbol: "plus", help: "Attach files (⌘O)") { store.chooseFiles(over: NSApp.keyWindow) }
                     .frame(height: rowHeight)
                 if store.messages.isEmpty && !store.voice.isConversing && !store.isOpeningSession && !store.showingHistory {
@@ -58,7 +102,7 @@ struct ComposerView: View {
                 }
 
                 ZStack(alignment: .leading) {
-                    if voice.isListening && !voice.isConversing {
+                    if voice.isListening {
                         HStack(spacing: 10) {
                             LevelBars(level: voice.level)
                             Text(voice.transcript.isEmpty ? "Listening…" : voice.transcript)
@@ -79,7 +123,6 @@ struct ComposerView: View {
                             .lineLimit(1...8)
                             .focused($focused)
                             .onSubmit { store.send() }
-                            .disabled(voice.isConversing)
                             .transition(.opacity)
                     }
                 }
@@ -95,33 +138,6 @@ struct ComposerView: View {
                 conversationButton.frame(height: rowHeight)
                 sendButton.frame(height: rowHeight)
             }
-            // Under a conversation the input is its own glass pill, raised off the messages. With no
-            // conversation the card itself is the input bar, so it stays flat.
-            .padding(.horizontal, inPill ? 6 : 0)
-            .padding(.vertical, inPill ? 5 : 0)
-            .modifier(PillGlass(isOn: inPill))
-
-            if store.showSlash {
-                SlashMenu()
-                    .transition(.move(edge: .top).combined(with: .opacity))
-            }
-        }
-        .padding(.horizontal, inPill ? 12 : 14)
-        .padding(.top, inPill ? 4 : 12)
-        .padding(.bottom, 12)
-        .background(WindowDragArea())
-        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: voice.isListening)
-        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: store.attachments.count)
-        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: store.showSlash)
-        .animation(.snappy, value: store.messages.isEmpty)
-        .animation(.snappy, value: inPill)
-        .animation(.snappy, value: store.currentModel.isEmpty)
-        .animation(.snappy, value: store.editingMessageId)
-        .onChange(of: store.draft) { _, text in store.updateSlash(for: text) }
-        .onChange(of: presentation.focusToken) { focused = true }
-        .onAppear { focused = true }
-        .onChange(of: focused, initial: true) { _, f in store.composerFocused = f }
-        .background(shortcuts)
     }
 
     static let buttonSize: CGFloat = 32
@@ -141,11 +157,11 @@ struct ComposerView: View {
         let bot = store.botName
         if let q = store.activeQuestion { return q.choices.isEmpty ? "Type your answer…" : "Or type your own answer…" }
         if store.editingMessageId != nil { return "Edit your message…" }
-        return store.voice.isConversing ? "Voice mode on" : "Ask \(bot)…"
+        return "Ask \(bot)…"
     }
 
     private var micButton: some View {
-        let listening = store.voice.isListening && !store.voice.isConversing
+        let listening = store.voice.isListening
         return Button { store.voice.toggleDictation() } label: {
             Image(systemName: listening ? "waveform" : "mic")
                 .font(.app(14, weight: .semibold))
@@ -157,20 +173,20 @@ struct ComposerView: View {
         .foregroundStyle(listening ? Color.red : .secondary)
         .glassEffect(listening ? .regular.tint(.red.opacity(0.25)).interactive() : .regular.interactive(), in: Circle())
         .help("Dictate (⌘D)")
-        .disabled(store.voice.isConversing)
     }
 
     private var conversationButton: some View {
-        Button { store.voice.toggleConversation() } label: {
-            Image(systemName: store.voice.isConversing ? "xmark" : "waveform.circle.fill")
-                .font(.app(store.voice.isConversing ? 13 : 17, weight: .semibold))
-                .contentTransition(.symbolEffect(.replace))
+        Button { store.voice.startConversation() } label: {
+            Image(systemName: "waveform.circle.fill")
+                .font(.app(17, weight: .semibold))
                 .frame(width: Self.buttonSize, height: Self.buttonSize)
         }
         .buttonStyle(.plain)
-        .foregroundStyle(store.voice.isConversing ? Color.primary : Color.accentColor)
+        .foregroundStyle(Color.accentColor)
         .glassEffect(.regular.interactive(), in: Circle())
-        .help(store.voice.isConversing ? "End voice mode" : "Voice mode (⇧⌘D)")
+        // Becomes voice mode's close button, in the same corner of the bar.
+        .matchedGeometryEffect(id: "voiceToggle", in: morph)
+        .help("Voice mode (⇧⌘D)")
     }
 
     private var sendButton: some View {
@@ -198,7 +214,7 @@ struct ComposerView: View {
         Group {
             Button("") { store.newChat() }.keyboardShortcut("n", modifiers: .command)
             Button("") { store.interrupt() }.keyboardShortcut(".", modifiers: .command)
-            Button("") { store.voice.toggleDictation() }.keyboardShortcut("d", modifiers: .command)
+            Button("") { if !store.voice.isConversing { store.voice.toggleDictation() } }.keyboardShortcut("d", modifiers: .command)
             Button("") { store.voice.toggleConversation() }.keyboardShortcut("d", modifiers: [.command, .shift])
             Button("") { store.chooseFiles(over: NSApp.keyWindow) }.keyboardShortcut("o", modifiers: .command)
             Button("") { store.regenerate() }.keyboardShortcut("r", modifiers: .command)

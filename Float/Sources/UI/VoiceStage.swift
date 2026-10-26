@@ -1,50 +1,111 @@
 import SwiftUI
 
-/// Hands-free voice mode: a living orb that reacts to your voice and to Hermes speaking.
+/// Hands-free voice mode. The orb starts in the middle; tapping it (or pulling it down) docks it
+/// small above the bar and brings in the chat, and tapping it again sends the chat away. It can
+/// be dragged a little, against a rubbery pull, and springs back to its place; pulled far enough
+/// toward the other spot, it lets go and jumps there.
 struct VoiceStage: View {
     @Environment(ChatStore.self) private var store
+    @State private var drag: CGSize = .zero
+    @State private var dragging = false
+    /// Where the pointer was, in this drag, when the orb last jumped spots; the pull counts from there.
+    @State private var dragBase: CGSize = .zero
+    @State private var appeared = false
+
+    private static let orbSize: CGFloat = 128
+    private static let dockedScale: CGFloat = 0.42
+    /// The furthest the orb follows a drag, however far the pointer goes.
+    private static let reach: CGFloat = 70
+    /// How far to pull toward the other spot before the orb jumps there.
+    private static let snapDistance: CGFloat = 100
 
     var body: some View {
         let voice = store.voice
-        VStack(spacing: 0) {
-            Spacer(minLength: 0)
-            VoiceOrb(phase: voice.phase, level: voice.level, busy: store.isBusy)
-                .frame(width: 128, height: 128)
-                .contentShape(Circle())
-                .onTapGesture {
-                    if voice.phase == .speaking { voice.bargeIn() }
+        GeometryReader { geo in
+            let docked = voice.showsChat
+            let center = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2 - 26)
+            let dock = CGPoint(x: geo.size.width / 2, y: geo.size.height - Self.orbSize * Self.dockedScale / 2 - 10)
+            ZStack {
+                if docked {
+                    MessageList(bottomInset: Self.orbSize * Self.dockedScale + 26)
+                        // The latest messages fade out behind the orb.
+                        .mask(LinearGradient(stops: [.init(color: .black, location: 1 - 64 / geo.size.height),
+                                                     .init(color: .clear, location: 1)],
+                                             startPoint: .top, endPoint: .bottom))
+                        .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: -28)),
+                                                removal: .opacity.combined(with: .offset(y: -14))))
+                } else {
+                    subtitle
+                        .font(.system(size: 17))
+                        .multilineTextAlignment(.center)
+                        .lineLimit(3)
+                        .padding(.horizontal, 40)
+                        .frame(width: geo.size.width, height: 80, alignment: .top)
+                        .position(x: center.x, y: center.y + Self.orbSize / 2 + 22 + 40)
+                        .animation(.smooth(duration: 0.3), value: voice.phase)
+                        .transition(.opacity)
                 }
-                .help(voice.phase == .speaking ? "Interrupt" : "")
-            Text(caption)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.secondary)
-                .contentTransition(.opacity)
-                .animation(.easeInOut(duration: 0.25), value: caption)
-                .padding(.top, 18)
-            subtitle
-                .font(.system(size: 17))
-                .multilineTextAlignment(.center)
-                .lineLimit(4)
-                .minimumScaleFactor(0.85)
-                .padding(.horizontal, 40)
-                .frame(maxWidth: .infinity)
-                .frame(height: 92, alignment: .top)
-                .padding(.top, 10)
-                .animation(.smooth(duration: 0.3), value: voice.phase)
-            Spacer(minLength: 0)
+                orb(docked: docked)
+                    .scaleEffect(appeared ? 1 : 0.55)
+                    .opacity(appeared ? 1 : 0)
+                    .position(docked ? dock : center)
+            }
         }
-        .frame(maxWidth: .infinity)
+        .onAppear {
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.72).delay(0.1)) { appeared = true }
+        }
     }
 
-    private var caption: String {
+    private func orb(docked: Bool) -> some View {
         let voice = store.voice
-        switch voice.phase {
-        case .preparing: return "Getting ready…"
-        case .listening: return "Listening"
-        case .waiting: return store.status.isEmpty ? "Thinking" : store.status
-        case .speaking: return "Speaking · tap to interrupt"
-        case .idle: return store.isBusy ? "Thinking" : "Voice mode"
+        // Squash and stretch along the pull.
+        let dx = abs(drag.width) / Self.reach, dy = abs(drag.height) / Self.reach
+        return VoiceOrb(phase: voice.phase, level: voice.level, busy: store.isBusy)
+            .frame(width: Self.orbSize, height: Self.orbSize)
+            .scaleEffect(x: 1 + 0.12 * dx - 0.06 * dy, y: 1 + 0.12 * dy - 0.06 * dx)
+            .offset(drag)
+            .scaleEffect(docked ? Self.dockedScale : 1)
+            .contentShape(Circle().scale(docked ? Self.dockedScale : 1))
+            .onTapGesture { setDocked(!docked) }
+            .gesture(
+                // Measured in window space: the orb itself moves when it snaps, which would
+                // otherwise jump the pull past the threshold the other way.
+                DragGesture(minimumDistance: 3, coordinateSpace: .global)
+                    .onChanged { g in
+                        dragging = true
+                        let pull = CGSize(width: g.translation.width - dragBase.width, height: g.translation.height - dragBase.height)
+                        if docked ? pull.height < -Self.snapDistance : pull.height > Self.snapDistance {
+                            dragBase = g.translation
+                            NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
+                            setDocked(!docked)
+                            return
+                        }
+                        drag = CGSize(width: Self.rubber(pull.width), height: Self.rubber(pull.height))
+                    }
+                    .onEnded { g in
+                        dragging = false
+                        // A flick toward the other spot carries it there too.
+                        let flick = (g.predictedEndTranslation.height - g.translation.height) * 0.6
+                        dragBase = .zero
+                        withAnimation(.spring(response: 0.5, dampingFraction: 0.55)) { drag = .zero }
+                        if !docked, flick > Self.snapDistance { setDocked(true) }
+                        if docked, flick < -Self.snapDistance { setDocked(false) }
+                    }
+            )
+            .pointerStyle(dragging ? .grabActive : .grabIdle)
+            .help(docked ? "Hide the chat" : "Show the chat")
+    }
+
+    private func setDocked(_ on: Bool) {
+        withAnimation(.spring(response: 0.55, dampingFraction: 0.75)) {
+            store.voice.showsChat = on
+            drag = .zero
         }
+    }
+
+    /// Follows the pointer less and less the further it goes, never past `reach`.
+    private static func rubber(_ v: CGFloat) -> CGFloat {
+        (v < 0 ? -1 : 1) * reach * (1 - exp(-abs(v) / (reach * 1.6)))
     }
 
     @ViewBuilder
@@ -59,10 +120,89 @@ struct VoiceStage: View {
             // What you asked, quietly, while Hermes works on it.
             Text(store.messages.last { $0.role == .user }?.text ?? "")
                 .foregroundStyle(.tertiary)
-                .transition(.opacity)
         default:
             EmptyView()
         }
+    }
+}
+
+/// The composer's pill in voice mode: what's happening on the left, and the controls on the right.
+struct VoiceBar: View {
+    @Environment(ChatStore.self) private var store
+    let rowHeight: CGFloat
+    let morph: Namespace.ID
+
+    var body: some View {
+        let voice = store.voice
+        HStack(spacing: 8) {
+            indicator
+                .frame(width: 28, height: rowHeight)
+            Text(status)
+                .font(.app(15, weight: .medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .contentTransition(.opacity)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .animation(.easeOut(duration: 0.2), value: status)
+            if voice.phase == .speaking {
+                circleButton("stop.fill", size: 11, help: "Stop speaking") { voice.bargeIn() }
+                    .transition(.scale(scale: 0.6).combined(with: .opacity))
+            }
+            circleButton(voice.isMuted ? "mic.slash.fill" : "mic.fill", size: 14,
+                         tint: voice.isMuted ? .red : nil, help: voice.isMuted ? "Unmute" : "Mute") { voice.toggleMute() }
+            circleButton("xmark", size: 13, help: "End voice mode (⇧⌘D)") { voice.stopConversation() }
+                .matchedGeometryEffect(id: "voiceToggle", in: morph)
+        }
+        .frame(height: rowHeight)
+        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: voice.phase)
+        .animation(.spring(response: 0.3, dampingFraction: 0.75), value: voice.isMuted)
+    }
+
+    @ViewBuilder
+    private var indicator: some View {
+        let voice = store.voice
+        Group {
+            if voice.phase == .listening {
+                LevelBars(level: voice.level).scaleEffect(0.8)
+            } else if voice.phase == .speaking {
+                Image(systemName: "waveform")
+                    .symbolEffect(.variableColor.iterative.dimInactiveLayers, options: .repeat(.continuous))
+                    .foregroundStyle(.tint)
+            } else if voice.phase == .waiting || store.isBusy {
+                ProgressView().controlSize(.small)
+            } else if voice.isMuted {
+                Image(systemName: "mic.slash").foregroundStyle(.secondary)
+            }
+        }
+        .font(.app(15, weight: .semibold))
+        .transition(.opacity.combined(with: .scale(scale: 0.8)))
+    }
+
+    private var status: String {
+        let voice = store.voice
+        switch voice.phase {
+        case .preparing: return "Getting ready…"
+        case .listening: return "Listening…"
+        case .waiting: return store.status.isEmpty ? "Thinking…" : store.status
+        case .speaking: return "Speaking"
+        case .idle:
+            if store.isBusy { return "Thinking…" }
+            return voice.isMuted ? "Microphone off" : "Getting ready…"
+        }
+    }
+
+    private func circleButton(_ symbol: String, size: CGFloat, tint: Color? = nil, help: String,
+                              action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.app(size, weight: .semibold))
+                .contentTransition(.symbolEffect(.replace))
+                .frame(width: ComposerView.buttonSize, height: ComposerView.buttonSize)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(tint ?? .primary)
+        .glassEffect(tint.map { .regular.tint($0.opacity(0.25)).interactive() } ?? .regular.interactive(), in: Circle())
+        .help(help)
     }
 }
 
