@@ -14,11 +14,25 @@ struct MessageList: View {
             rows.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).clipped()
         } else {
             ScrollView { rows }
+                // Animations from outside (a tool step or a reply finishing, changed inside
+                // withAnimation) would also animate the list holding its place at the bottom: it
+                // scrolls up and springs back. Rows animate themselves instead; only the list's
+                // own scrolls (`ListScroll`) keep theirs.
+                .transaction { if !$0[ListScroll.self] { $0.animation = nil } }
                 .contentMargins(.bottom, bottomInset, for: .scrollContent)
                 .scrollPosition($position)
                 .defaultScrollAnchor(.bottom, for: .sizeChanges)
                 .defaultScrollAnchor(.bottom, for: .initialOffset)
                 .scrollIndicators(.automatic)
+                .onScrollGeometryChange(for: CGFloat.self) { g in
+                    g.contentSize.height - g.visibleRect.maxY
+                } action: { _, gap in
+                    #if DEBUG
+                    if ProcessInfo.processInfo.environment["FLOAT_SCROLL_LOG"] != nil {
+                        print(String(format: "GAP %.3f %.1f", Date().timeIntervalSinceReferenceDate, gap))
+                    }
+                    #endif
+                }
                 .onScrollGeometryChange(for: Bool.self) { g in
                     g.contentSize.height - g.visibleRect.maxY > 160
                 } action: { _, away in
@@ -31,7 +45,9 @@ struct MessageList: View {
                 .overlay(alignment: .bottom) {
                     if awayFromBottom {
                         ScrollToBottomButton {
-                            withAnimation(.smooth(duration: 0.45)) { position.scrollTo(edge: .bottom) }
+                            var glide = Transaction(animation: .smooth(duration: 0.45))
+                            glide[ListScroll.self] = true
+                            withTransaction(glide) { position.scrollTo(edge: .bottom) }
                         }
                         .padding(.bottom, 14 + bottomInset)
                         .transition(.scale(scale: 0.6).combined(with: .opacity).combined(with: .offset(y: 8)))
@@ -75,9 +91,12 @@ struct MessageList: View {
                     }
                     .padding(.top, i == 0 ? 0 : joinsPrevious ? 3 : Self.gap(before: msg) * Preferences.shared.textScale)
                         .id(msg.id)
+                        // Each row brings its own animation, so adding one never animates the list's
+                        // scroll position (which made it jump up and spring back).
                         .transition(.asymmetric(
-                            insertion: .move(edge: .bottom).combined(with: .opacity).combined(with: .scale(scale: 0.98, anchor: .bottom)),
-                            removal: .opacity))
+                            insertion: .opacity.combined(with: .scale(scale: 0.96, anchor: .bottom))
+                                .animation(.spring(response: 0.4, dampingFraction: 0.85)),
+                            removal: .opacity.animation(.easeOut(duration: 0.15))))
                 }
                 if !store.status.isEmpty {
                     Label(store.status, systemImage: "sparkle")
@@ -85,7 +104,7 @@ struct MessageList: View {
                         .foregroundStyle(.secondary)
                         .symbolEffect(.pulse)
                         .padding(.top, 14)
-                        .transition(.opacity)
+                        .transition(.opacity.animation(.easeOut(duration: 0.2)))
                 }
             }
             // Inset as far as the card's corner radius, so text clears the rounded corners
@@ -161,7 +180,7 @@ struct MessageRow: View {
                 Label("Editing", systemImage: "pencil")
                     .font(.app(11, weight: .medium))
                     .foregroundStyle(.secondary)
-                    .transition(.opacity)
+                    .transition(.opacity.animation(.snappy))
             } else if message.queued {
                 HStack(spacing: 6) {
                     Label("Waiting for connection. It sends when Hermes is back.", systemImage: "clock")
@@ -170,7 +189,7 @@ struct MessageRow: View {
                         .buttonStyle(.link)
                 }
                 .font(.app(11.5, weight: .medium))
-                .transition(.opacity.combined(with: .move(edge: .top)))
+                .transition(.opacity.combined(with: .move(edge: .top)).animation(.snappy))
             } else if message.failed && isLatestUser {
                 HStack(spacing: 6) {
                     Label("Didn't go through", systemImage: "exclamationmark.circle.fill")
@@ -180,7 +199,7 @@ struct MessageRow: View {
                         .disabled(!store.canRegenerate)
                 }
                 .font(.app(11.5, weight: .medium))
-                .transition(.opacity.combined(with: .move(edge: .top)))
+                .transition(.opacity.combined(with: .move(edge: .top)).animation(.snappy))
             }
         }
         .onHover { h in withAnimation(.easeOut(duration: 0.15)) { hovering = h } }
@@ -222,7 +241,7 @@ struct MessageRow: View {
             if message.isDraft && message.text.isEmpty {
                 ListeningDots()
                     .frame(height: 18)
-                    .transition(.opacity)
+                    .transition(.opacity.animation(.easeOut(duration: 0.2)))
             } else if !message.text.isEmpty {
                 Text(message.text)
                     .font(.app(14))
@@ -252,8 +271,12 @@ struct MessageRow: View {
                                      startPoint: .top, endPoint: .bottom))
                 .opacity(message.isDraft ? 0 : 1)
         }
-        .overlay { if message.isDraft { ListeningOutline(shape: BubbleShape(tail: hasTail)).transition(.opacity) } }
-        .animation(.easeOut(duration: 0.2), value: message.text)
+        .overlay {
+            if message.isDraft {
+                ListeningOutline(shape: BubbleShape(tail: hasTail)).transition(.opacity.animation(.easeOut(duration: 0.35)))
+            }
+        }
+        .animation(.easeOut(duration: 0.35), value: message.isDraft)
         .padding(.trailing, 5)  // room for the tail, kept for every bubble so a run lines up
         .opacity(isEditing ? 0.45 : 1)
     }
@@ -401,7 +424,8 @@ struct ToolStrip: View {
             }
             ForEach(shown) { tool in
                 ToolChip(tool: tool)
-                    .transition(.move(edge: .leading).combined(with: .opacity))
+                    .transition(.move(edge: .leading).combined(with: .opacity)
+                        .animation(.spring(response: 0.35, dampingFraction: 0.8)))
             }
         }
     }
@@ -545,4 +569,9 @@ private struct ListeningDots: View {
             .foregroundStyle(.secondary)
         }
     }
+}
+
+/// Marks a transaction as the message list's own scroll, which keeps its animation.
+private struct ListScroll: TransactionKey {
+    static let defaultValue = false
 }

@@ -8,7 +8,9 @@ import SwiftUI
 ///   -uiPreviewLongTitle            give the chat a long title
 ///   -uiPreviewWidth 520            panel width for this run (your saved width is put back)
 ///   -uiPreviewCompact              show the compact bar, before a chat starts
-///   -uiPreviewVoice listening|speaking|thinking   show voice mode in that state
+///   -uiPreviewVoice listening|speaking|thinking|docked|draft   show voice mode in that state
+///   -uiPreviewVoiceScript          play a voice turn with the chat showing, then quit; with
+///                                  FLOAT_SCROLL_LOG=1 the list logs its distance from the bottom
 ///   -uiPreviewPicker               with -uiPreviewSnapshot, render the model picker instead
 ///   -uiPreviewSnapshot out.png     render the panel to a PNG and quit. Needs no Screen Recording
 ///                                  permission, but system glass and blur can't be captured in-process.
@@ -32,6 +34,7 @@ enum UIPreview {
         fill(store)
         panel.window.appearance = NSAppearance(named: .darkAqua)
         panel.show()
+        if args.contains("-uiPreviewVoiceScript") { runVoiceTurn(store) }
 
         guard let out = value(after: "-uiPreviewSnapshot") else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
@@ -77,6 +80,60 @@ enum UIPreview {
         ]
         if args.contains("-uiPreviewCompact") { store.messages = [] }
         if let state = value(after: "-uiPreviewVoice") { store.voice.preview(state) }
+    }
+
+    /// A scripted voice turn with the chat showing: words arrive, they're sent, a reply streams in.
+    /// Run with FLOAT_SCROLL_LOG=1 to log the list's distance from the bottom as it goes.
+    private static func runVoiceTurn(_ store: ChatStore) {
+        let voice = store.voice
+        voice.preview("draft")
+        voice.previewHear("")
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.5))
+            print("SCRIPT hearing")
+            let words = "And how much space would pruning those two snapshots free up on the volume".split(separator: " ")
+            for n in 1...words.count {
+                voice.previewHear(words.prefix(n).joined(separator: " "))
+                try? await Task.sleep(for: .milliseconds(180))
+            }
+            try? await Task.sleep(for: .milliseconds(800))
+            print("SCRIPT send")
+            let (text, id) = voice.previewSend()
+            withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) {
+                var msg = ChatMessage(role: .user, text: text)
+                msg.id = id
+                store.messages.append(msg)
+                store.isBusy = true
+            }
+            try? await Task.sleep(for: .seconds(1.2))
+            print("SCRIPT reply")
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                store.messages.append(ChatMessage(role: .assistant, text: "", isStreaming: true))
+            }
+            try? await Task.sleep(for: .seconds(0.6))
+            print("SCRIPT tool")
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                store.messages[store.messages.count - 1].tools.append(ToolActivity(id: "9", name: "terminal", preview: "ssh nas du -sh snapshots"))
+            }
+            try? await Task.sleep(for: .seconds(0.8))
+            print("SCRIPT stream")
+            let reply = "Pruning both snapshots frees about 412 GB, which takes /volume1 from 98% to 61% full. That leaves plenty of room for the nightly run and a few weeks of growth."
+            var shown = ""
+            for word in reply.split(separator: " ") {
+                shown += (shown.isEmpty ? "" : " ") + word
+                store.messages[store.messages.count - 1].text = shown
+                try? await Task.sleep(for: .milliseconds(60))
+            }
+            print("SCRIPT finish")
+            withAnimation(.smooth(duration: 0.3)) {
+                store.messages[store.messages.count - 1].isStreaming = false
+                store.isBusy = false
+                store.status = ""
+            }
+            print("SCRIPT done")
+            try? await Task.sleep(for: .seconds(1))
+            exit(0)
+        }
     }
 
     /// Renders a fresh QuickChatView with SwiftUI's ImageRenderer (AppKit's in-process capture leaves the

@@ -283,6 +283,15 @@ final class VoiceEngine {
     }
 
     #if DEBUG
+    /// For `-uiPreviewVoiceScript`: hear words, then send them, the way `finishListening` does.
+    func previewHear(_ text: String) { transcript = text }
+    func previewSend() -> (String, UUID) {
+        let sent = (transcript, draftID)
+        phase = .waiting
+        draftID = UUID()
+        return sent
+    }
+
     /// For `-uiPreviewVoice`: show the stage in a state without a microphone or a reply.
     func preview(_ state: String) {
         isConversing = true
