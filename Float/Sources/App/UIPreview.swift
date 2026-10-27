@@ -8,6 +8,7 @@ import SwiftUI
 ///   -uiPreviewLongTitle            give the chat a long title
 ///   -uiPreviewWidth 520            panel width for this run (your saved width is put back)
 ///   -uiPreviewCompact              show the compact bar, before a chat starts
+///   -uiPreviewTable                show a reply with a wide, wrapping table instead
 ///   -uiPreviewVoice listening|speaking|thinking|docked|draft   show voice mode in that state
 ///   -uiPreviewVoiceScript          play a voice turn with the chat showing, then quit; with
 ///                                  FLOAT_SCROLL_LOG=1 the list logs its distance from the bottom
@@ -78,6 +79,19 @@ enum UIPreview {
                 ```
                 """, tools: [tool1, tool2]),
         ]
+        if args.contains("-uiPreviewTable") {
+            store.messages = [
+                ChatMessage(role: .user, text: "How much space is each snapshot set using?"),
+                ChatMessage(role: .assistant, text: """
+                    | Snapshot set | Findings |
+                    | --- | --- |
+                    | photo-import-2025 | **Largest by far.** 412 GB across 38 snapshots, almost all of it RAW files that were later deleted from the library. |
+                    | photo-import-2026 | **Also large.** 286 GB, mostly duplicates of the 2025 set left over from the migration. |
+                    | documents | **Small.** 9 GB. |
+                    | home | **Fine.** 61 GB, pruned on schedule and within the retention policy you set last spring. |
+                    """),
+            ]
+        }
         if args.contains("-uiPreviewCompact") { store.messages = [] }
         if let state = value(after: "-uiPreviewVoice") { store.voice.preview(state) }
     }

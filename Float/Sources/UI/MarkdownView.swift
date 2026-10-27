@@ -397,39 +397,91 @@ struct TableBlock: View {
     let table: MarkdownView.Table
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
-                GridRow {
-                    ForEach(Array(table.header.enumerated()), id: \.offset) { i, cell in
-                        self.cell(cell, column: i).fontWeight(.semibold)
-                    }
-                }
-                .background(.primary.opacity(0.06))
-                ForEach(Array(table.rows.enumerated()), id: \.offset) { r, row in
-                    Divider().gridCellUnsizedAxes(.horizontal)
-                    GridRow {
-                        ForEach(Array(row.enumerated()), id: \.offset) { i, cell in self.cell(cell, column: i) }
-                    }
-                    .background(r % 2 == 1 ? Color.primary.opacity(0.025) : .clear)
-                }
+        TableLayout(columns: table.header.count) {
+            ForEach(Array(table.header.enumerated()), id: \.offset) { i, cell in
+                self.cell(cell, column: i, row: -1).fontWeight(.semibold)
             }
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(.primary.opacity(0.1)))
-            .padding(.vertical, 1)
+            ForEach(Array(table.rows.enumerated()), id: \.offset) { r, row in
+                ForEach(Array(row.enumerated()), id: \.offset) { i, cell in self.cell(cell, column: i, row: r) }
+            }
         }
-        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(.primary.opacity(0.1)))
+        .padding(.vertical, 1)
     }
 
-    private func cell(_ text: String, column: Int) -> some View {
+    /// `row` is -1 for the header. Each cell fills its slot so backgrounds and dividers span the whole row.
+    private func cell(_ text: String, column: Int, row: Int) -> some View {
         let alignment = table.alignments[column]
         return Text(MarkdownView.inline(text))
             .font(.app(13))
             .multilineTextAlignment(alignment == .trailing ? .trailing : alignment == .center ? .center : .leading)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: 280, alignment: Alignment(horizontal: alignment, vertical: .center))
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .gridColumnAlignment(alignment)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: Alignment(horizontal: alignment, vertical: .top))
+            .background(row < 0 ? Color.primary.opacity(0.06) : row % 2 == 1 ? Color.primary.opacity(0.025) : .clear)
+            .overlay(alignment: .top) { if row >= 0 { Divider() } }
+    }
+}
+
+/// Lays cells out row-major in `columns` columns. Columns that fit on one line keep their natural width;
+/// the rest share what's left of the proposed width and wrap. Each row is as tall as its tallest cell.
+private struct TableLayout: Layout {
+    let columns: Int
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let widths = columnWidths(available: proposal.width, subviews: subviews)
+        return CGSize(width: widths.reduce(0, +), height: rowHeights(widths, subviews).reduce(0, +))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let widths = columnWidths(available: bounds.width, subviews: subviews)
+        let heights = rowHeights(widths, subviews)
+        var y = bounds.minY
+        for (r, height) in heights.enumerated() {
+            var x = bounds.minX
+            for c in 0..<columns {
+                let i = r * columns + c
+                guard i < subviews.count else { break }
+                subviews[i].place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(width: widths[c], height: height))
+                x += widths[c]
+            }
+            y += height
+        }
+    }
+
+    /// Water-fills the available width: columns narrower than an even share keep their natural width,
+    /// and whatever remains is split evenly among the wider ones.
+    private func columnWidths(available: CGFloat?, subviews: Subviews) -> [CGFloat] {
+        guard columns > 0 else { return [] }
+        var natural = [CGFloat](repeating: 0, count: columns)
+        for (i, subview) in subviews.enumerated() {
+            natural[i % columns] = max(natural[i % columns], ceil(subview.sizeThatFits(.unspecified).width))
+        }
+        guard let available, available.isFinite, natural.reduce(0, +) > available else { return natural }
+
+        var widths = natural
+        var open = Set(0..<columns)
+        var remaining = available
+        while !open.isEmpty {
+            let share = remaining / CGFloat(open.count)
+            let fitting = open.filter { natural[$0] <= share }
+            if fitting.isEmpty {
+                for c in open { widths[c] = floor(max(share, 0)) }
+                break
+            }
+            for c in fitting { remaining -= natural[c] }
+            open.subtract(fitting)
+        }
+        return widths
+    }
+
+    private func rowHeights(_ widths: [CGFloat], _ subviews: Subviews) -> [CGFloat] {
+        stride(from: 0, to: subviews.count, by: max(columns, 1)).map { start in
+            (start..<min(start + columns, subviews.count)).map { i in
+                ceil(subviews[i].sizeThatFits(ProposedViewSize(width: widths[i - start], height: nil)).height)
+            }.max() ?? 0
+        }
     }
 }
 
