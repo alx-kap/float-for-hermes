@@ -115,12 +115,13 @@ struct MenuBarContent: View {
             .keyboardShortcut("q")
     }
 
+    // Kept short: the longest title sets the menu's width. The host lives in Settings › Connection.
     private var statusText: String {
         switch store.gateway.state {
-        case .connected: "Connected · \(Preferences.shared.baseURL?.host() ?? "")"
+        case .connected: "Connected"
         case .connecting: "Connecting…"
         case .needsSignIn: "Sign-in required"
-        case .failed(let m): m.count > 40 ? String(m.prefix(40)) + "…" : m
+        case .failed(let m): m.count > 24 ? String(m.prefix(24)) + "…" : m
         case .idle: "Idle"
         }
     }
