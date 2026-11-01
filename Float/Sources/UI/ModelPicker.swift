@@ -22,8 +22,16 @@ struct ModelPicker: View {
             }
             if store.models.isEmpty {
                 HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    Text("Loading models…").foregroundStyle(.secondary)
+                    if store.isLoadingModels || (store.modelsError == nil && !store.modelsFetched) {
+                        ProgressView().controlSize(.small)
+                        Text("Loading models…").foregroundStyle(.secondary)
+                    } else {
+                        Text(store.modelsError.map { "Couldn't load models: \($0)" } ?? "The gateway listed no models. Check your providers.")
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 8)
+                        Button("Retry") { Task { await store.refreshModels() } }
+                    }
                 }
                 .padding(.horizontal, 10).padding(.vertical, 8)
             }

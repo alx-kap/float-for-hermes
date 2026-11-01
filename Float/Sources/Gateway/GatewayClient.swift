@@ -240,13 +240,20 @@ final class GatewayClient {
     // MARK: Public RPC
 
     @discardableResult
-    func call(_ method: String, _ params: JSON = [:]) async throws -> JSON {
+    func call(_ method: String, _ params: JSON = [:], timeout: Double? = nil) async throws -> JSON {
         if method != "client.capabilities" { try await ensureConnected() }
         guard let ws = task else { throw RPCError(code: -1, message: "Not connected") }
         let id = nextId
         nextId += 1
         let frame: JSON = ["jsonrpc": "2.0", "id": id, "method": method, "params": params]
         let data = try JSONSerialization.data(withJSONObject: frame)
+        if let timeout {
+            // A reply that never comes would otherwise leave the caller waiting forever.
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(timeout))
+                pending.removeValue(forKey: id)?.resume(throwing: RPCError(code: -2, message: "\(method) timed out after \(Int(timeout))s"))
+            }
+        }
         return try await withCheckedThrowingContinuation { cont in
             pending[id] = cont
             ws.send(.string(String(decoding: data, as: UTF8.self))) { [weak self] err in

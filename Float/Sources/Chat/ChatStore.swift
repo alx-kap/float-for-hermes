@@ -20,6 +20,10 @@ final class ChatStore {
     var currentModel = ""
     var currentProvider = ""
     var models: [ModelChoice] = []
+    var isLoadingModels = false
+    var modelsFetched = false
+    /// Why the last model fetch failed; nil when it worked (even if the gateway listed nothing).
+    var modelsError: String?
     /// Keyed by `ModelChoice.id`. A model missing here is assumed to think and not offer fast mode.
     var modelCapabilities: [String: ModelCapabilities] = [:]
     var thinking: ThinkingLevel = .medium
@@ -453,7 +457,23 @@ final class ChatStore {
         var params: JSON = ["profile": prefs.profile, "explicit_only": true]
         if let sid = sessionId { params["session_id"] = sid }
         await refreshThinking()
-        guard let res = try? await gateway.call("model.options", params) else { return }
+        isLoadingModels = true
+        defer { isLoadingModels = false }
+        let res: JSON
+        do {
+            res = try await gateway.call("model.options", params, timeout: 30)
+            modelsError = nil
+        } catch {
+            if (error as? RPCError)?.code == 5098 {
+                // The gateway refuses model calls while it runs pre-update code. It clears once the
+                // server restarts, so say so plainly and keep checking instead of waiting on a click.
+                modelsError = "Your Hermes server was updated but is still running the old version. Restart it (hermes-serve) and models will appear."
+                scheduleModelsRetry()
+            } else {
+                modelsError = error.localizedDescription
+            }
+            return
+        }
         var out: [ModelChoice] = []
         var caps: [String: ModelCapabilities] = [:]
         for p in res["providers"] as? [JSON] ?? [] {
@@ -472,9 +492,21 @@ final class ChatStore {
             }
         }
         models = out
+        modelsFetched = true
         modelCapabilities = caps
         if let m = res["model"] as? String, !m.isEmpty { currentModel = m }
         if let p = res["provider"] as? String, !p.isEmpty { currentProvider = p }
+    }
+
+    private var modelsRetry: Task<Void, Never>?
+
+    private func scheduleModelsRetry() {
+        guard modelsRetry == nil else { return }
+        modelsRetry = Task {
+            try? await Task.sleep(for: .seconds(20))
+            modelsRetry = nil
+            if !Task.isCancelled, models.isEmpty { await refreshModels() }
+        }
     }
 
     private static let newestModelsPerProvider = 4

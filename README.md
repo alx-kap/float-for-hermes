@@ -126,6 +126,22 @@ You should, for the full experience. Float is the lightweight companion for quic
 **Does my data go anywhere other than my gateway?**
 No. Float only connects to the gateway you point it at. Voice is transcribed on your Mac by Apple's on-device speech models, and your audio is never sent anywhere.
 
+## Troubleshooting
+
+**The model picker is stuck, or says "Your Hermes server was updated but is still running the old version."**
+After `hermes update`, the server refuses model requests until it restarts, because a process still running pre-update code could crash mid-session. The Hermes desktop app hits the same wall. Float re-checks every 20 seconds, so the picker fills in by itself once the server restarts.
+
+The process Float talks to is `hermes serve` (port 9119 by default), which is separate from the messaging gateway. `hermes gateway restart` does not restart it. On the machine running Hermes:
+
+```bash
+systemctl --user restart hermes-serve.service
+```
+
+If you don't use systemd, stop and start it by hand: `hermes serve --stop`, then `hermes serve --host <your-host> --port 9119`. The web dashboard (`hermes-dashboard.service`) can go stale the same way, so restart it too if you use it.
+
+**The picker shows "Couldn't load models: …" with some other message.**
+That's the gateway's own error, passed through. A timeout or sign-in error usually means a dropped connection or an expired session; sign out and back in under Settings › Connection.
+
 ## Contributing
 
 Issues and pull requests are welcome. If you're changing the UI, the bar is simple: it should feel like it belongs on a Mac.

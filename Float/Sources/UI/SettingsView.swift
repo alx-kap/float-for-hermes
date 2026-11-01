@@ -410,7 +410,12 @@ private struct ModelsPane: View {
             let groups = Dictionary(grouping: store.models, by: \.providerName)
             if store.models.isEmpty {
                 Section {
-                    LabeledContent("Loading models from your gateway…") { ProgressView().controlSize(.small) }
+                    if store.isLoadingModels || (store.modelsError == nil && !store.modelsFetched) {
+                        LabeledContent("Loading models from your gateway…") { ProgressView().controlSize(.small) }
+                    } else {
+                        Text(store.modelsError.map { "Couldn't load models: \($0)" } ?? "The gateway listed no models. Check your providers.")
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             ForEach(groups.keys.sorted(), id: \.self) { provider in
